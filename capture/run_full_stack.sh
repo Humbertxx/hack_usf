@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # One-shot Mac orchestration: start CV on RunPod (if needed), then capture.
 #
-# RunPod ssh.runpod.io does NOT support ssh -L tunnels. Use RUNPOD_HTTP_URL (HTTP proxy
-# from the RunPod dashboard) so the Mac posts frames to https://...proxy.runpod.net.
+# RunPod ssh.runpod.io does NOT support ssh -L. Set RUNPOD_PUBLIC_URL to reach the API:
+#   HTTP service: https://<id>-<internal-port>.proxy.runpod.net
+#   TCP expose:   http://<public-ip>:<mapped-port>  (FastAPI is still HTTP over that TCP socket)
 #
 # From repo root:
 #   ./capture/run_full_stack.sh
@@ -28,8 +29,9 @@ RUNPOD_REMOTE_REPO="${RUNPOD_REMOTE_REPO:-/workspace/hack_usf}"
 RUNPOD_REMOTE_PYTHON="${RUNPOD_REMOTE_PYTHON:-python3}"
 HEALTH_WAIT_SEC="${HEALTH_WAIT_SEC:-60}"
 PYTHON_BIN="${PYTHON:-python3}"
-RUNPOD_HTTP_URL="${RUNPOD_HTTP_URL:-}"
-RUNPOD_HTTP_URL="${RUNPOD_HTTP_URL%/}"
+# Prefer RUNPOD_PUBLIC_URL; RUNPOD_HTTP_URL kept as an alias for older runpod.env files.
+RUNPOD_PUBLIC_URL="${RUNPOD_PUBLIC_URL:-${RUNPOD_HTTP_URL:-}}"
+RUNPOD_PUBLIC_URL="${RUNPOD_PUBLIC_URL%/}"
 
 CAPTURE_ARGS=()
 if [[ "${1:-}" == -- ]]; then
@@ -48,11 +50,11 @@ command -v "$PYTHON_BIN" >/dev/null 2>&1 || {
   exit 1
 }
 
-if [[ -z "$RUNPOD_HTTP_URL" ]] && [[ "${RUNPOD_IP}" == "ssh.runpod.io" ]]; then
+if [[ -z "$RUNPOD_PUBLIC_URL" ]] && [[ "${RUNPOD_IP}" == "ssh.runpod.io" ]]; then
   echo "error: ssh.runpod.io cannot be used for SSH port forwarding (-L)." >&2
-  echo "  In RunPod: expose port ${REMOTE_PORT} (HTTP), copy the proxy base URL, then add to capture/runpod.env:" >&2
-  echo "    RUNPOD_HTTP_URL=https://<id>-<port>.proxy.runpod.net" >&2
-  echo "  (No autossh tunnel needed.)" >&2
+  echo "  Expose internal port ${REMOTE_PORT} on the pod, then set RUNPOD_PUBLIC_URL in capture/runpod.env:" >&2
+  echo "    HTTP service: https://<id>-${REMOTE_PORT}.proxy.runpod.net" >&2
+  echo "    TCP expose:    http://<public-ip>:<mapped-port>  (from RunPod Connect)" >&2
   exit 1
 fi
 
@@ -92,11 +94,11 @@ echo "[run_full_stack] uvicorn did not become healthy on pod (see /tmp/hack_usf-
 exit 1
 EOF
 
-if [[ -n "$RUNPOD_HTTP_URL" ]]; then
-  echo "[run_full_stack] Checking public URL (no SSH tunnel): ${RUNPOD_HTTP_URL}/health"
+if [[ -n "$RUNPOD_PUBLIC_URL" ]]; then
+  echo "[run_full_stack] Checking public URL (no SSH tunnel): ${RUNPOD_PUBLIC_URL}/health"
   tunnel_ok=0
   for ((i = 1; i <= HEALTH_WAIT_SEC; i++)); do
-    if curl -sf "${RUNPOD_HTTP_URL}/health" >/dev/null; then
+    if curl -sf "${RUNPOD_PUBLIC_URL}/health" >/dev/null; then
       echo "[run_full_stack] Public health OK."
       tunnel_ok=1
       break
@@ -104,11 +106,11 @@ if [[ -n "$RUNPOD_HTTP_URL" ]]; then
     sleep 1
   done
   if [[ "$tunnel_ok" -ne 1 ]]; then
-    echo "error: ${RUNPOD_HTTP_URL}/health did not respond within ${HEALTH_WAIT_SEC}s." >&2
-    echo "  Expose port ${REMOTE_PORT} as HTTP on the pod and check RUNPOD_HTTP_URL." >&2
+    echo "error: ${RUNPOD_PUBLIC_URL}/health did not respond within ${HEALTH_WAIT_SEC}s." >&2
+    echo "  Expose internal port ${REMOTE_PORT} (HTTP or TCP) and check RUNPOD_PUBLIC_URL." >&2
     exit 1
   fi
-  export CAPTURE_SERVER_URL="${RUNPOD_HTTP_URL}/process-frame"
+  export CAPTURE_SERVER_URL="${RUNPOD_PUBLIC_URL}/process-frame"
 else
   command -v autossh >/dev/null 2>&1 || {
     echo "error: install autossh for SSH tunnel (brew install autossh)." >&2

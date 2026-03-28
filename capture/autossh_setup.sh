@@ -5,7 +5,7 @@
 #   brew install autossh
 #
 # IMPORTANT: RunPod's proxied host ssh.runpod.io does NOT support ssh -L forwarding.
-# Use RunPod's HTTP proxy URL instead (see runpod.env.example RUNPOD_HTTP_URL) or a pod
+# Use RunPod's public URL instead (see runpod.env.example RUNPOD_PUBLIC_URL) or a pod
 # with direct (public IP) SSH.
 #
 # Configure once (pick one):
@@ -39,7 +39,7 @@ fi
 
 if [[ "${RUNPOD_IP}" == "ssh.runpod.io" ]] && [[ -z "${RUNPOD_FORCE_SSH_TUNNEL:-}" ]]; then
   echo "error: ssh.runpod.io does not support SSH local port forwarding (-L)." >&2
-  echo "  Set RUNPOD_HTTP_URL in capture/runpod.env (RunPod dashboard → HTTP service / proxy URL)" >&2
+  echo "  Set RUNPOD_PUBLIC_URL in capture/runpod.env (HTTP proxy or TCP http://ip:port from dashboard)" >&2
   echo "  and use ./capture/run_full_stack.sh, or use a pod with direct SSH + public IP." >&2
   exit 1
 fi
