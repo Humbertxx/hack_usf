@@ -40,7 +40,7 @@ if [[ "${1:-}" == -- ]]; then
 fi
 
 if [[ -z "${RUNPOD_IP:-}" || -z "${RUNPOD_PORT:-}" ]]; then
-  echo "error: set RUNPOD_IP and RUNPOD_PORT (see ${SCRIPT_DIR}/runpod.env.example)." >&2
+  echo "error: set RUNPOD_IP and RUNPOD_PORT in ${SCRIPT_DIR}/runpod.env." >&2
   exit 1
 fi
 
@@ -77,7 +77,7 @@ trap cleanup EXIT INT TERM
 
 echo "[run_full_stack] Ensuring uvicorn on pod at ${RUNPOD_REMOTE_REPO} (port ${REMOTE_PORT})..."
 # ${REMOTE_PORT} expands on the Mac before ssh runs; \$(seq ...) runs on the pod.
-ssh "${ssh_opts[@]}" "${RUNPOD_SSH_USER}@${RUNPOD_IP}" bash -s <<EOF
+if ! ssh "${ssh_opts[@]}" "${RUNPOD_SSH_USER}@${RUNPOD_IP}" bash -s <<EOF
 set -euo pipefail
 cd $(printf '%q' "$RUNPOD_REMOTE_REPO")
 if curl -sf "http://127.0.0.1:${REMOTE_PORT}/health" >/dev/null; then
@@ -93,6 +93,14 @@ done
 echo "[run_full_stack] uvicorn did not become healthy on pod (see /tmp/hack_usf-uvicorn.log)" >&2
 exit 1
 EOF
+then
+  echo "" >&2
+  echo "hint: On the pod, install CV deps once (from repo root), then re-run this script:" >&2
+  echo "  cd $(printf '%q' "$RUNPOD_REMOTE_REPO") && python3 -m pip install -r cv/requirements.txt" >&2
+  echo "  (Install CUDA torch first if needed — see comments at top of cv/requirements.txt.)" >&2
+  echo "If you use a venv, set RUNPOD_REMOTE_PYTHON in capture/runpod.env to that python." >&2
+  exit 1
+fi
 
 if [[ -n "$RUNPOD_PUBLIC_URL" ]]; then
   echo "[run_full_stack] Checking public URL (no SSH tunnel): ${RUNPOD_PUBLIC_URL}/health"

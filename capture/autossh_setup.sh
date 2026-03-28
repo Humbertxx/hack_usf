@@ -5,12 +5,10 @@
 #   brew install autossh
 #
 # IMPORTANT: RunPod's proxied host ssh.runpod.io does NOT support ssh -L forwarding.
-# Use RunPod's public URL instead (see runpod.env.example RUNPOD_PUBLIC_URL) or a pod
+# Use RunPod's public URL instead (configure RUNPOD_PUBLIC_URL in capture/runpod.env) or a pod
 # with direct (public IP) SSH.
 #
-# Configure once (pick one):
-#   1) Copy and edit: cp capture/runpod.env.example capture/runpod.env
-#   2) Export RUNPOD_* vars, or RUNPOD_ENV_FILE=/path/to/file ./capture/autossh_setup.sh
+# Configure in capture/runpod.env, or export RUNPOD_* and RUNPOD_ENV_FILE=/path/to/file
 #
 # Then from repo root: ./capture/autossh_setup.sh
 #
@@ -33,7 +31,7 @@ LOCAL_PORT="${LOCAL_PORT:-8080}"
 REMOTE_PORT="${REMOTE_PORT:-8080}"
 
 if [[ -z "${RUNPOD_IP:-}" || -z "${RUNPOD_PORT:-}" ]]; then
-  echo "error: set RUNPOD_IP and RUNPOD_PORT (e.g. in ${SCRIPT_DIR}/runpod.env — see runpod.env.example)." >&2
+  echo "error: set RUNPOD_IP and RUNPOD_PORT in ${SCRIPT_DIR}/runpod.env." >&2
   exit 1
 fi
 
