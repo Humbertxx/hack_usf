@@ -6,7 +6,7 @@ import ctypes
 import os
 import subprocess
 import sys
-from ctypes import byref, c_int, c_uint
+from ctypes import byref, c_int
 
 # CUresult (subset)
 _CUDA_SUCCESS = 0
@@ -23,6 +23,23 @@ def _cu_result_name(code: int) -> str:
     return _ERRORS.get(code, f"CUresult({code})")
 
 
+def _warn_visible_devices() -> None:
+    raw = os.environ.get("NVIDIA_VISIBLE_DEVICES")
+    if raw is None:
+        return
+    if raw.strip().lower() == "void":
+        print(
+            "\n*** NVIDIA_VISIBLE_DEVICES=void tells the NVIDIA container stack not to expose GPUs\n"
+            "    to CUDA (cuInit / PyTorch), even if nvidia-smi works.\n\n"
+            "    Fix, then re-run:\n"
+            "      export NVIDIA_VISIBLE_DEVICES=all\n"
+            "    or:\n"
+            "      unset NVIDIA_VISIBLE_DEVICES\n\n"
+            "    If it keeps resetting, find what sets it (e.g. grep ~/.bashrc /etc/profile /workspace — 'void').\n",
+            file=sys.stderr,
+        )
+
+
 def main() -> int:
     print("=== environment ===")
     for k in (
@@ -32,6 +49,8 @@ def main() -> int:
         "NVIDIA_DRIVER_CAPABILITIES",
     ):
         print(f"{k}={os.environ.get(k, '<unset>')}")
+
+    _warn_visible_devices()
 
     print("\n=== which libcuda ===")
     # Prefer what ldconfig knows; fallback to implicit load path

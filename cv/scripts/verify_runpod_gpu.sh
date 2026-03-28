@@ -5,6 +5,11 @@ echo "=== CUDA-related environment ==="
 echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES-<unset>}"
 echo "NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES-<unset>}"
 echo "NVIDIA_DRIVER_CAPABILITIES=${NVIDIA_DRIVER_CAPABILITIES-<unset>}"
+if [[ "${NVIDIA_VISIBLE_DEVICES-}" == "void" ]]; then
+  echo
+  echo "WARNING: NVIDIA_VISIBLE_DEVICES=void disables CUDA for PyTorch/libcuda; use:" >&2
+  echo "  export NVIDIA_VISIBLE_DEVICES=all   # or: unset NVIDIA_VISIBLE_DEVICES" >&2
+fi
 echo
 
 echo "=== NVIDIA device nodes (GPU must be passed into the container) ==="

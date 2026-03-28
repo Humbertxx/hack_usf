@@ -33,6 +33,7 @@ The script prints `nvidia-smi`, device nodes, and a `libcuda` check before impor
 
 1. **No `/dev/nvidia*` or `nvidia-smi` fails** — The machine is not a working GPU pod (CPU template, wrong region, or runtime did not attach the GPU). Create or restart a pod that includes an NVIDIA GPU and uses a CUDA-capable image.
 2. **`nvidia-smi` works but PyTorch still says CUDA unavailable** — Often environment or a stale session:
+   - If **`NVIDIA_VISIBLE_DEVICES=void`**, CUDA is intentionally disabled for the container stack (`cuInit` fails, PyTorch sees no GPU). Run **`export NVIDIA_VISIBLE_DEVICES=all`** or **`unset NVIDIA_VISIBLE_DEVICES`** and try again; find what reset it (`grep -r void ~/.bashrc /etc/profile /workspace 2>/dev/null`).
    - Run `echo "$CUDA_VISIBLE_DEVICES"`. If it is empty, run `unset CUDA_VISIBLE_DEVICES` (an empty value can break enumeration).
    - Stop the pod and start it again; re-open a terminal and re-run the script in the same venv.
 3. **Driver / runtime mismatch** — Very new PyTorch (cu128) needs a host driver that supports that CUDA generation. If everything else looks fine, try another RunPod PyTorch or CUDA base image, or ask support whether the node’s driver matches CUDA 12.8.
