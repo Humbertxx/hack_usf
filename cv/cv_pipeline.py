@@ -287,6 +287,9 @@ class CVPipeline:
         if identity_store is not None:
             from cv.reid_embeddings import ReIDEmbedder
             self._reid_embedder = ReIDEmbedder()
+            print(f"[CVPipeline] ReID enabled. Identity store has {identity_store.count} enrolled subjects.")
+        else:
+            print("[CVPipeline] WARNING: No identity store provided - ReID matching disabled!")
 
     def close(self) -> None:
         if self._pose.backend == "legacy" and self._pose.legacy is not None:
@@ -408,7 +411,13 @@ class CVPipeline:
                 return
             
             embedding = self._reid_embedder.extract_embedding(crop)
-            match = self._identity_store.match(embedding)
+            
+            # Debug: compute similarity scores against all enrolled subjects
+            match = self._identity_store.match(embedding, threshold=0.65)
+            debug_match = self._identity_store.match(embedding, threshold=0.0)
+            if debug_match:
+                debug_id, debug_sim = debug_match
+                print(f"[ReID Debug] Best match: {debug_id} with similarity {debug_sim:.3f} (threshold: 0.65)")
             
             if match:
                 subject_id, similarity = match
@@ -419,13 +428,15 @@ class CVPipeline:
                     detection.is_enrolled = True
                     detection.bbox_color = subject.color
                     detection.identity_confidence = similarity
+                    print(f"[ReID] MATCHED: {subject.display_name} (sim={similarity:.3f})")
             else:
                 detection.person_id = self._assign_visitor_id(embedding)
                 detection.is_enrolled = False
                 detection.bbox_color = "#808080"  # Gray for visitors
                 detection.identity_confidence = None
-        except Exception:
-            pass
+                print(f"[ReID] No match above threshold, assigned: {detection.person_id}")
+        except Exception as e:
+            print(f"[ReID] Error during enrichment: {e}")
 
     def process_frame(
         self,
@@ -476,7 +487,9 @@ class CVPipeline:
                         bbox = [0.0, 0.0, 0.0, 0.0]
                     detection = Detection(label=name, confidence=float(conf), bbox=bbox)
                     if is_person:
+                        print(f"[CVPipeline] Person detected, running ReID enrichment...")
                         self._enrich_person_detection(frame, detection)
+                        print(f"[CVPipeline] After enrichment: person_id={detection.person_id}, display_name={detection.display_name}")
                     detections.append(detection)
 
         labels = sorted({x for x in raw_labels})

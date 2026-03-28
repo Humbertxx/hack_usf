@@ -105,10 +105,25 @@ def _print_cv_result(response: dict) -> None:
     person_detected = obs.get("person_detected", False)
     objects_detected = obs.get("objects_detected", [])
     frame_quality = obs.get("frame_quality", 0)
+    detections = obs.get("detections", [])
     
     status = "[filtered]" if filtered else "[sent]"
     print(f"  {status} Person: {person_detected} | Quality: {frame_quality:.2f}")
     print(f"  Pose: {pose} ({pose_conf:.2f}) | Activity: {activity} ({activity_conf:.2f})")
+    
+    # Show identified persons
+    for det in detections:
+        if det.get("label") == "person":
+            display_name = det.get("display_name")
+            is_enrolled = det.get("is_enrolled", False)
+            identity_conf = det.get("identity_confidence")
+            person_id = det.get("person_id")
+            
+            if is_enrolled and display_name:
+                conf_str = f" ({identity_conf:.0%})" if identity_conf else ""
+                print(f"  Identity: {display_name}{conf_str}")
+            elif person_id:
+                print(f"  Identity: {person_id} (not enrolled)")
     
     if objects_detected:
         print(f"  Objects: {', '.join(objects_detected[:5])}", end="")
@@ -119,7 +134,7 @@ def _print_cv_result(response: dict) -> None:
     if alert:
         alert_type = alert.get("alert_type", "unknown")
         message = alert.get("quick_message", "")
-        print(f"  ⚠️  ALERT: {alert_type} - {message}")
+        print(f"  ALERT: {alert_type} - {message}")
 
 
 # Color palette for different object classes (BGR)
@@ -158,14 +173,24 @@ def _draw_detections(frame: np.ndarray, response: dict) -> np.ndarray:
         label = det.get("label", "?")
         conf = det.get("confidence", 0)
         bbox = det.get("bbox", [])
+        display_name = det.get("display_name")
+        is_enrolled = det.get("is_enrolled", False)
+        bbox_color = det.get("bbox_color")
+        identity_conf = det.get("identity_confidence")
         
         if len(bbox) != 4:
             continue
         
-        # Assign consistent color per label
-        if label not in label_colors:
-            label_colors[label] = _COLORS[len(label_colors) % len(_COLORS)]
-        color = label_colors[label]
+        # Use enrolled subject's color if available, otherwise assign by label
+        if bbox_color and is_enrolled:
+            # Parse hex color to BGR
+            hex_color = bbox_color.lstrip('#')
+            r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            color = (b, g, r)  # BGR format
+        else:
+            if label not in label_colors:
+                label_colors[label] = _COLORS[len(label_colors) % len(_COLORS)]
+            color = label_colors[label]
         
         # Convert normalized coords to pixel coords
         x1 = int(bbox[0] * w)
@@ -173,11 +198,19 @@ def _draw_detections(frame: np.ndarray, response: dict) -> np.ndarray:
         x2 = int(bbox[2] * w)
         y2 = int(bbox[3] * h)
         
-        # Draw rectangle
-        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
+        # Draw rectangle (thicker for enrolled subjects)
+        thickness = 3 if is_enrolled else 2
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, thickness)
         
-        # Draw label background
-        text = f"{label} {conf:.0%}"
+        # Build label text - show display_name for enrolled subjects
+        if is_enrolled and display_name:
+            if identity_conf:
+                text = f"{display_name} ({identity_conf:.0%})"
+            else:
+                text = display_name
+        else:
+            text = f"{label} {conf:.0%}"
+        
         (text_w, text_h), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
         cv2.rectangle(overlay, (x1, y1 - text_h - 10), (x1 + text_w + 4, y1), color, -1)
         
