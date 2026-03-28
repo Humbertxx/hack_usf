@@ -30,12 +30,16 @@ from pathlib import Path
 from typing import Optional
 
 
-def _capture_from_camera(camera_index: int) -> Optional[bytes]:
+def _capture_from_camera(camera_index: int, show_crop: bool = True) -> Optional[bytes]:
     """
     Capture a frame from camera with interactive preview.
     
     Shows live preview and captures when user presses SPACE.
     Press ESC or Q to cancel.
+    
+    Args:
+        camera_index: Camera device index
+        show_crop: If True, show the detected person crop after capture
     
     Returns:
         JPEG-encoded image bytes, or None if cancelled.
@@ -95,12 +99,65 @@ def _capture_from_camera(camera_index: int) -> Optional[bytes]:
     if captured_frame is None:
         return None
 
+    # Show the captured frame with person detection
+    if show_crop:
+        _show_captured_person(captured_frame)
+
     success, encoded = cv2.imencode(".jpg", captured_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
     if not success:
         print("Error: Failed to encode frame as JPEG")
         return None
 
     return encoded.tobytes()
+
+
+def _show_captured_person(frame) -> None:
+    """
+    Display the captured frame with detected person highlighted.
+    Shows for 3 seconds or until any key is pressed.
+    """
+    import cv2
+    
+    try:
+        from ultralytics import YOLO
+    except ImportError:
+        print("(YOLO not available for preview)")
+        return
+
+    display = frame.copy()
+    h, w = display.shape[:2]
+
+    model = YOLO("yolov8n.pt")
+    results = model.predict(source=frame, verbose=False)
+
+    person_found = False
+    if results and results[0].boxes is not None:
+        boxes = results[0].boxes
+        for i, cls in enumerate(boxes.cls.tolist()):
+            if int(cls) == 0:  # person class
+                person_found = True
+                conf = boxes.conf[i].item()
+                xyxy = boxes.xyxy[i].tolist()
+                x1, y1, x2, y2 = map(int, xyxy)
+                
+                # Draw bounding box
+                cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 0), 3)
+                
+                # Draw label
+                label = f"Person {conf:.0%}"
+                (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+                cv2.rectangle(display, (x1, y1 - text_h - 10), (x1 + text_w + 4, y1), (0, 255, 0), -1)
+                cv2.putText(display, label, (x1 + 2, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+
+    # Add status text
+    status = "Person detected - this will be enrolled" if person_found else "No person detected!"
+    color = (0, 255, 0) if person_found else (0, 0, 255)
+    cv2.putText(display, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+    cv2.putText(display, "Press any key to continue...", (10, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+    cv2.imshow("Captured Frame - Press any key", display)
+    cv2.waitKey(3000)  # Show for 3 seconds or until key press
+    cv2.destroyAllWindows()
 
 
 def _load_image_file(image_path: str) -> Optional[bytes]:
