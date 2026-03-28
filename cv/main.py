@@ -168,16 +168,60 @@ def create_app(
             app.state.reid_embedder = ReIDEmbedder()
         return app.state.reid_embedder
 
-    def _extract_embedding_from_image(image_bytes: bytes) -> np.ndarray:
-        """Extract person embedding from uploaded image."""
+    def _extract_embedding_from_image(image_bytes: bytes) -> tuple[np.ndarray, Optional[list[float]]]:
+        """
+        Extract person embedding from uploaded image.
+        
+        Detects person using YOLO, crops to the largest person bounding box,
+        then extracts the ReID embedding from the crop.
+        
+        Returns:
+            Tuple of (embedding, bbox) where bbox is [x1, y1, x2, y2] normalized or None
+        """
         arr = np.frombuffer(image_bytes, dtype=np.uint8)
         frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if frame is None:
             raise HTTPException(status_code=400, detail="Invalid or empty image")
 
+        h, w = frame.shape[:2]
+        
+        # Detect persons using YOLO
+        pipeline: CVPipeline = app.state.pipeline
+        results = pipeline.yolo_model.predict(source=frame, verbose=False)
+        
+        best_person_crop = None
+        best_person_bbox = None
+        best_area = 0
+        
+        if results and results[0].boxes is not None:
+            boxes = results[0].boxes
+            for i, cls in enumerate(boxes.cls.tolist()):
+                if int(cls) == 0:  # person class
+                    xyxy = boxes.xyxy[i].tolist()
+                    x1, y1, x2, y2 = map(int, xyxy)
+                    area = (x2 - x1) * (y2 - y1)
+                    
+                    if area > best_area:
+                        best_area = area
+                        # Add padding around the crop
+                        pad_x = int((x2 - x1) * 0.05)
+                        pad_y = int((y2 - y1) * 0.05)
+                        crop_x1 = max(0, x1 - pad_x)
+                        crop_y1 = max(0, y1 - pad_y)
+                        crop_x2 = min(w, x2 + pad_x)
+                        crop_y2 = min(h, y2 + pad_y)
+                        best_person_crop = frame[crop_y1:crop_y2, crop_x1:crop_x2].copy()
+                        best_person_bbox = [x1 / w, y1 / h, x2 / w, y2 / h]
+        
+        if best_person_crop is None:
+            raise HTTPException(
+                status_code=400, 
+                detail="No person detected in image. Please ensure a person is clearly visible."
+            )
+        
         embedder = _get_reid_embedder()
-        embedding = embedder.extract_embedding(frame)
-        return embedding
+        embedding = embedder.extract_embedding(best_person_crop)
+        return embedding, best_person_bbox
 
     @app.post("/enroll-subject", response_model=EnrollResponse)
     async def enroll_subject(
@@ -205,7 +249,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="Empty file uploaded")
 
         try:
-            embedding = _extract_embedding_from_image(raw)
+            embedding, bbox = _extract_embedding_from_image(raw)
         except HTTPException:
             raise
         except Exception as e:
@@ -222,11 +266,15 @@ def create_app(
             color=color,
         )
 
+        bbox_str = ""
+        if bbox:
+            bbox_str = f" (bbox: [{bbox[0]:.2f}, {bbox[1]:.2f}, {bbox[2]:.2f}, {bbox[3]:.2f}])"
+
         return EnrollResponse(
             success=True,
             subject_id=subject.subject_id,
             embedding_count=len(subject.embeddings),
-            message=f"Subject '{display_name}' enrolled successfully",
+            message=f"Subject '{display_name}' enrolled successfully{bbox_str}",
         )
 
     @app.get("/subjects", response_model=SubjectListResponse)
@@ -289,7 +337,7 @@ def create_app(
             raise HTTPException(status_code=400, detail="Empty file uploaded")
 
         try:
-            embedding = _extract_embedding_from_image(raw)
+            embedding, bbox = _extract_embedding_from_image(raw)
         except HTTPException:
             raise
         except Exception as e:
