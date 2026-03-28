@@ -1,0 +1,20 @@
+# Local / CPU dev: installs CPU PyTorch from PyPI unless torch is already present.
+# RunPod (RTX 5090 / Blackwell): install CUDA 12.8 wheels FIRST (from repo root):
+#   pip install --upgrade pip
+#   pip install "torch>=2.8.0" "torchvision>=0.23.0" --index-url https://download.pytorch.org/whl/cu128
+#   pip install -r cv/requirements.txt
+# Dev + tests: pip install -r cv/requirements-dev.txt && cd cv && python -m pytest
+#
+# Official selector: https://pytorch.org/get-started/locally/ (Linux + CUDA 12.8)
+#
+# MediaPipe pose: set CV_POSE_BACKEND=auto|legacy|tasks|none (default auto). RunPod/Linux usually supports
+# tasks or legacy; some macOS/headless setups require `none` or Linux+EGL. Lite model caches under cv/.cache/
+
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+ultralytics>=8.3.0
+mediapipe>=0.10.14
+opencv-python-headless>=4.10.0
+httpx>=0.27.0
+pydantic>=2.0
+numpy>=1.26.0
