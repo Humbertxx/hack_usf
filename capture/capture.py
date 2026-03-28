@@ -15,7 +15,7 @@ import numpy as np
 
 # Defaults per WORKSTREAM_A_CV_SETUP.md Phase 4.1
 RESOLUTION = (1280, 720)
-CAPTURE_INTERVAL = 15  # seconds
+CAPTURE_INTERVAL = 5  # seconds
 JPEG_QUALITY = 85
 SERVER_URL = "http://localhost:8080/process-frame"
 
