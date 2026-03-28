@@ -1,0 +1,11 @@
+# Single-pass install for GPU pods: CUDA 12.8 + PyTorch >= 2.8 (RTX 5090 / sm_120).
+# After: python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.version.cuda)"
+
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch>=2.8.0
+torchvision>=0.23.0
+
+# From repo root:
+#   pip install -r server/requirements-cuda128.lockstep.txt
+
+-r server/requirements.txt
