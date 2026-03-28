@@ -75,7 +75,9 @@ if not torch.cuda.is_available():
         "  - Empty CUDA_VISIBLE_DEVICES: unset CUDA_VISIBLE_DEVICES or set to 0 (not '').\n"
         "  - Host driver too old for this PyTorch build: upgrade template / contact RunPod.\n"
         "  - Mixed installs: ensure `which python3` matches the env where torch was installed.\n"
-        "  - Odd /dev nodes (only /dev/nvidia7, no nvidia0): bash cv/scripts/ensure_nvidia0_alias.sh then re-run.",
+        "  - Odd /dev nodes: symlink e.g. ln -sf /dev/nvidia7 /dev/nvidia0 (if /dev writable).\n"
+        "  - If symlink exists but CUDA still fails: python3 cv/scripts/diagnose_cuda_driver.py\n"
+        "    (cuInit vs PyTorch) and try unset LD_LIBRARY_PATH or a different RunPod GPU image.",
         file=sys.stderr,
     )
     raise SystemExit(1)
