@@ -2,6 +2,7 @@
 # RunPod (RTX 5090 / Blackwell): install CUDA 12.8 wheels FIRST (from repo root):
 #   pip install --upgrade pip
 #   pip install "torch>=2.8.0" "torchvision>=0.23.0" --index-url https://download.pytorch.org/whl/cu128
+#   (torchvision 0.22.x on PyPI requires torch 2.7.x; torchvision 0.23.x is the 2.8 line — keep them in one install.)
 #   pip install -r cv/requirements.txt
 # Dev + tests: pip install -r cv/requirements-dev.txt && cd cv && python -m pytest
 #
@@ -9,6 +10,9 @@
 #
 # MediaPipe pose: set CV_POSE_BACKEND=auto|legacy|tasks|none (default auto). RunPod/Linux usually supports
 # tasks or legacy; some macOS/headless setups require `none` or Linux+EGL. Lite model caches under cv/.cache/
+# Headless containers: MediaPipe *tasks* may need OpenGL ES (`libGLESv2.so.2`). If startup fails, try:
+#   apt-get update && apt-get install -y libgles2-mesa
+# or rely on `auto` falling back to pose disabled when tasks cannot load (YOLO still runs).
 
 fastapi>=0.115.0
 python-multipart>=0.0.9

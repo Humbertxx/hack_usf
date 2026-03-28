@@ -151,45 +151,71 @@ class _PoseHandles:
     video_ms: int = 0
 
 
+def _legacy_pose_handle() -> _PoseHandles:
+    legacy = mp.solutions.pose.Pose(
+        static_image_mode=False,
+        model_complexity=1,
+        enable_segmentation=False,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+    return _PoseHandles(backend="legacy", legacy=legacy)
+
+
+def _tasks_pose_handle() -> _PoseHandles:
+    from mediapipe.tasks import python
+    from mediapipe.tasks.python import vision
+
+    model_path = _ensure_pose_model()
+    options = vision.PoseLandmarkerOptions(
+        base_options=python.BaseOptions(
+            model_asset_path=str(model_path),
+            delegate=python.BaseOptions.Delegate.CPU,
+        ),
+        running_mode=vision.RunningMode.VIDEO,
+        num_poses=1,
+        min_pose_detection_confidence=0.5,
+        min_pose_presence_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+    landmarker = vision.PoseLandmarker.create_from_options(options)
+    return _PoseHandles(backend="tasks", landmarker=landmarker)
+
+
 def _build_pose_handles(backend_pref: str) -> _PoseHandles:
     pref = (backend_pref or "auto").strip().lower()
     if pref == "none":
         return _PoseHandles(backend="none")
 
-    if pref in ("auto", "legacy") and hasattr(mp, "solutions") and hasattr(mp.solutions, "pose"):
-        legacy = mp.solutions.pose.Pose(
-            static_image_mode=False,
-            model_complexity=1,
-            enable_segmentation=False,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
-        return _PoseHandles(backend="legacy", legacy=legacy)
+    can_legacy = hasattr(mp, "solutions") and hasattr(mp.solutions, "pose")
 
     if pref == "legacy":
-        raise RuntimeError(
-            "CV_POSE_BACKEND=legacy but mediapipe.solutions.pose is not available "
-            "(common on Python 3.13+ wheels). Use Python 3.10–3.12, or CV_POSE_BACKEND=tasks, or none."
-        )
+        if not can_legacy:
+            raise RuntimeError(
+                "CV_POSE_BACKEND=legacy but mediapipe.solutions.pose is not available "
+                "(common on Python 3.13+ wheels). Use Python 3.10–3.12, or CV_POSE_BACKEND=tasks, or none."
+            )
+        return _legacy_pose_handle()
+
+    if pref == "auto" and can_legacy:
+        try:
+            return _legacy_pose_handle()
+        except Exception:
+            pass
 
     if pref in ("auto", "tasks"):
-        from mediapipe.tasks import python
-        from mediapipe.tasks.python import vision
-
-        model_path = _ensure_pose_model()
-        options = vision.PoseLandmarkerOptions(
-            base_options=python.BaseOptions(
-                model_asset_path=str(model_path),
-                delegate=python.BaseOptions.Delegate.CPU,
-            ),
-            running_mode=vision.RunningMode.VIDEO,
-            num_poses=1,
-            min_pose_detection_confidence=0.5,
-            min_pose_presence_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
-        landmarker = vision.PoseLandmarker.create_from_options(options)
-        return _PoseHandles(backend="tasks", landmarker=landmarker)
+        try:
+            return _tasks_pose_handle()
+        except OSError as exc:
+            # Tasks API loads mediapipe .so's that link libGLESv2 (often absent in headless GPU containers).
+            if pref == "tasks":
+                raise RuntimeError(
+                    "MediaPipe tasks pose failed to load native libraries (typical: missing libGLESv2.so.2). "
+                    "On Debian/Ubuntu: apt-get install -y libgles2-mesa "
+                    "or set CV_POSE_BACKEND=legacy (if available) or none. "
+                    f"Original error: {exc}"
+                ) from exc
+            return _PoseHandles(backend="none")
 
     return _PoseHandles(backend="none")
 
@@ -237,10 +263,7 @@ class CVPipeline:
         self._device = _device()
         self.yolo_model = YOLO(yolo_model_name)
         pref = pose_backend if pose_backend is not None else os.environ.get("CV_POSE_BACKEND", "auto")
-        try:
-            self._pose = _build_pose_handles(pref)
-        except RuntimeError:
-            self._pose = _PoseHandles(backend="none")
+        self._pose = _build_pose_handles(pref)
         self._prev_kp: Optional[np.ndarray] = None
 
     def close(self) -> None:
