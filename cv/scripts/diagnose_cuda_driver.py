@@ -6,7 +6,7 @@ import ctypes
 import os
 import subprocess
 import sys
-from ctypes import byref, c_int
+from ctypes import byref, c_int, c_uint
 
 # CUresult (subset)
 _CUDA_SUCCESS = 0
