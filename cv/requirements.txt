@@ -23,5 +23,10 @@ opencv-python-headless>=4.10.0
 httpx>=0.27.0
 pydantic>=2.0
 numpy>=1.26.0
+
+# torchreid: Install separately AFTER other deps due to build dependency on numpy:
+#   pip install gdown
+#   pip install git+https://github.com/KaiyangZhou/deep-person-reid.git
+# Or use the simpler PyPI package (may need Cython):
+#   pip install torchreid
 gdown
-torchreid @ git+https://github.com/KaiyangZhou/deep-person-reid.git
