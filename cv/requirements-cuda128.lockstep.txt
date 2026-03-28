@@ -7,5 +7,7 @@ torchvision>=0.23.0
 
 # From repo root:
 #   pip install -r cv/requirements-cuda128.lockstep.txt
+# From cv/ (nested -r is resolved relative to this file’s directory):
+#   pip install -r requirements-cuda128.lockstep.txt
 
--r cv/requirements.txt
+-r requirements.txt
