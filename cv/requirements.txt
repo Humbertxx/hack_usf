@@ -11,6 +11,7 @@
 # tasks or legacy; some macOS/headless setups require `none` or Linux+EGL. Lite model caches under cv/.cache/
 
 fastapi>=0.115.0
+python-multipart>=0.0.9
 uvicorn[standard]>=0.32.0
 ultralytics>=8.3.0
 mediapipe>=0.10.14
