@@ -75,6 +75,7 @@ obs = generate_mock_observation()
 client.add_observation(obs)
 alert = generate_mock_alert(obs.id)
 client.add_alert(alert)
+created_alert_id = alert.id
 
 # Final flush
 client.flush()
@@ -85,7 +86,14 @@ for obs in client.get_recent_observations(5):
     print(f"  {obs['ID']}: {obs['POSE']} - {obs['ACTIVITY']}")
 
 print("\nUnacknowledged alerts:")
-for alert in client.get_unacknowledged_alerts():
-    print(f"  {alert['ALERT_TYPE']}: {alert['QUICK_MESSAGE']}")
+unack_alerts = client.get_unacknowledged_alerts()
+for row in unack_alerts:
+    print(f"  {row['ALERT_TYPE']}: {row['QUICK_MESSAGE']} (ID: {row['ID']})")
+
+# Acknowledge the alert we just created (or the first unacknowledged alert)
+alert_id_to_ack = created_alert_id or (unack_alerts[0]['ID'] if unack_alerts else None)
+if alert_id_to_ack:
+    client.update_alert_acknowledged(alert_id_to_ack, "test-user")
+    print(f"\nAcknowledged alert {alert_id_to_ack} as test-user")
 
 client.close()
