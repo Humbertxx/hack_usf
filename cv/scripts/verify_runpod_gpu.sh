@@ -23,8 +23,8 @@ if ls /dev/nvidia* >/dev/null 2>&1; then
   if [[ ! -e /dev/nvidia0 ]]; then
     echo
     echo "NOTE: /dev/nvidia0 is missing. Some stacks expect it; nvidia-smi can still work." >&2
-    echo "      Try: export NVIDIA_VISIBLE_DEVICES=all && re-run this script." >&2
-    echo "      If PyTorch still fails, recreate the pod or use another GPU template." >&2
+    echo "      Try: sudo bash cv/scripts/ensure_nvidia0_alias.sh (ephemeral; one GPU node only)" >&2
+    echo "      Or: export NVIDIA_VISIBLE_DEVICES=all && re-run; else new pod / GPU template." >&2
   fi
 else
   echo "No /dev/nvidia* — this pod almost certainly is not GPU-enabled, or the runtime did not inject devices."
@@ -75,7 +75,7 @@ if not torch.cuda.is_available():
         "  - Empty CUDA_VISIBLE_DEVICES: unset CUDA_VISIBLE_DEVICES or set to 0 (not '').\n"
         "  - Host driver too old for this PyTorch build: upgrade template / contact RunPod.\n"
         "  - Mixed installs: ensure `which python3` matches the env where torch was installed.\n"
-        "  - Odd /dev nodes (e.g. only /dev/nvidia7, no nvidia0): try NVIDIA_VISIBLE_DEVICES=all or a fresh pod.",
+        "  - Odd /dev nodes (only /dev/nvidia7, no nvidia0): bash cv/scripts/ensure_nvidia0_alias.sh then re-run.",
         file=sys.stderr,
     )
     raise SystemExit(1)

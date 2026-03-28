@@ -37,7 +37,7 @@ The script prints `nvidia-smi`, device nodes, and a `libcuda` check before impor
    - Stop the pod and start it again; re-open a terminal and re-run the script in the same venv.
 3. **Driver / runtime mismatch** — Very new PyTorch (cu128) needs a host driver that supports that CUDA generation. If everything else looks fine, try another RunPod PyTorch or CUDA base image, or ask support whether the node’s driver matches CUDA 12.8.
 
-4. **`nvidia-smi` works but `/dev/nvidia0` is missing** — Some pods only expose a node like `/dev/nvidia7`. Try `export NVIDIA_VISIBLE_DEVICES=all`, or stop/start the pod or pick a different GPU image; the verify script prints a note when `nvidia0` is absent.
+4. **`nvidia-smi` works but `/dev/nvidia0` is missing** — Some pods only expose `/dev/nvidiaN` (e.g. `nvidia7`); PyTorch may then show `CUDA unknown error` even when `libcuda` loads. From repo root, as root: `bash cv/scripts/ensure_nvidia0_alias.sh`, then `bash cv/scripts/verify_runpod_gpu.sh` again. That node is recreated on pod restart; a cleaner long-term fix is a GPU template that injects the usual `/dev/nvidia0`.
 hackaton project for 2026 HackUsf
 
 
