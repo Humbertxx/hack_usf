@@ -9,6 +9,5 @@ This backend is organized by responsibility to keep the CV pipeline, API, and re
 - services: CV pipeline, Claude integration, business logic
 - ws: WebSocket handlers and realtime broadcast
 - config: environment and config templates
-- tests: unit and integration tests
 - scripts: dev helpers (seed, run, smoke tests)
 
