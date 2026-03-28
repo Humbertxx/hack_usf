@@ -33,28 +33,28 @@ export default function InsightCard(){
     <>
 
     <div className="flex items-center justify-center gap-6 flex-wrap p-1 mt-5">
-        <div className="shadow-lg w-[410px] h-[220px] bg-white rounded-2xl hover:shadow-2xl">
+        <div className="shadow-lg w-[410px] h-[180px] bg-white rounded-2xl hover:shadow-2xl">
             <p className ="ml-6 mt-6 font-bold text-xl">Activity Level</p>
             <p className ="ml-6 mt-8 text-2xl">67 hrs/day</p>
-            <p className="ml-6 mt-15 text-base text-gray-500">More active than usual.</p>
+            <p className="ml-6 mt-8 text-base text-gray-500">More active than usual.</p>
         </div>
 
-        <div className="shadow-lg w-[410px] h-[220px] bg-white rounded-2xl hover:shadow-2xl">
+        <div className="shadow-lg w-[410px] h-[180px] bg-white rounded-2xl hover:shadow-2xl">
             <p className ="ml-6 mt-6 font-bold text-xl">Sleep Quality</p>
             <p className ="ml-6 mt-8 text-2xl">67%</p>
-            <p className="ml-6 mt-15 text-base text-gray-500">Less sleep than normal.</p>
+            <p className="ml-6 mt-8 text-base text-gray-500">Less sleep than normal.</p>
         </div>
 
-        <div className="shadow-lg w-[410px] h-[220px] bg-white rounded-2xl hover:shadow-2xl">
+        <div className="shadow-lg w-[410px] h-[180px] bg-white rounded-2xl hover:shadow-2xl">
             <p className ="ml-6 mt-6 font-bold text-xl">Meal Regularity</p>
             <p className ="ml-6 mt-8 text-2xl">100%</p>
-            <p className="ml-6 mt-15 text-base text-gray-500">Well fed.</p>
+            <p className="ml-6 mt-8 text-base text-gray-500">Well fed.</p>
         </div>
 
-        <div className="shadow-lg w-[410px] h-[220px] bg-white rounded-2xl hover:shadow-2xl">
+        <div className="shadow-lg w-[410px] h-[180px] bg-white rounded-2xl hover:shadow-2xl">
             <p className ="ml-6 mt-6 font-bold text-xl">Well-being Score</p>
             <p className ="ml-6 mt-8 text-2xl">0/100</p>
-            <p className="ml-6 mt-15 text-base text-gray-500">Uh oh.</p>
+            <p className="ml-6 mt-8 text-base text-gray-500">Uh oh.</p>
         </div>
     </div>
 
