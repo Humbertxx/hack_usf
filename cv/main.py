@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Callable, List, Optional
 
 import cv2
@@ -16,6 +17,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from pydantic import BaseModel
+from dotenv import load_dotenv
 
 from cv.alert_engine import AlertEngine
 from cv.cv_pipeline import CVPipeline
@@ -117,6 +119,9 @@ def create_app(
     snowflake: Optional[Any] = None,
     identity_store: Optional[IdentityStore] = None,
 ) -> FastAPI:
+    # Repo-root .env (Snowflake, etc.). Does not override existing os.environ.
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
     store = identity_store or IdentityStore()
     pipeline_factory = pipeline_factory or (lambda: CVPipeline(identity_store=store))
 
