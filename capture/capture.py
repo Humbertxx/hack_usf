@@ -97,31 +97,100 @@ def _print_cv_result(response: dict) -> None:
     obs = response.get("observation", {})
     alert = response.get("alert")
     
-    if filtered:
-        print("  [filtered - no significant change]")
-        return
-    
+    # Always show observation data
     pose = obs.get("pose", "unknown")
-    confidence = obs.get("confidence", 0)
-    detections = obs.get("detections", [])
+    pose_conf = obs.get("pose_confidence", 0)
+    activity = obs.get("activity", "unknown")
+    activity_conf = obs.get("activity_confidence", 0)
+    person_detected = obs.get("person_detected", False)
+    objects_detected = obs.get("objects_detected", [])
+    frame_quality = obs.get("frame_quality", 0)
     
-    print(f"  Pose: {pose} (confidence: {confidence:.2f})")
+    status = "[filtered]" if filtered else "[sent]"
+    print(f"  {status} Person: {person_detected} | Quality: {frame_quality:.2f}")
+    print(f"  Pose: {pose} ({pose_conf:.2f}) | Activity: {activity} ({activity_conf:.2f})")
     
-    if detections:
-        print(f"  Detections ({len(detections)}):")
-        for det in detections[:5]:  # Show first 5
-            label = det.get("label", "?")
-            conf = det.get("confidence", 0)
-            print(f"    - {label}: {conf:.2f}")
-        if len(detections) > 5:
-            print(f"    ... and {len(detections) - 5} more")
-    else:
-        print("  No detections")
+    if objects_detected:
+        print(f"  Objects: {', '.join(objects_detected[:5])}", end="")
+        if len(objects_detected) > 5:
+            print(f" +{len(objects_detected) - 5} more", end="")
+        print()
     
     if alert:
         alert_type = alert.get("alert_type", "unknown")
         message = alert.get("quick_message", "")
         print(f"  ⚠️  ALERT: {alert_type} - {message}")
+
+
+# Color palette for different object classes (BGR)
+_COLORS = [
+    (0, 255, 0),    # green
+    (255, 0, 0),    # blue
+    (0, 0, 255),    # red
+    (255, 255, 0),  # cyan
+    (255, 0, 255),  # magenta
+    (0, 255, 255),  # yellow
+    (128, 255, 0),  # lime
+    (255, 128, 0),  # sky blue
+    (128, 0, 255),  # purple
+    (0, 128, 255),  # orange
+]
+
+
+def _draw_detections(frame: np.ndarray, response: dict) -> np.ndarray:
+    """Draw bounding boxes and labels on frame based on CV response."""
+    if response is None:
+        return frame
+    
+    obs = response.get("observation", {})
+    detections = obs.get("detections", [])
+    pose = obs.get("pose", "unknown")
+    pose_conf = obs.get("pose_confidence", 0)
+    activity = obs.get("activity", "unknown")
+    
+    h, w = frame.shape[:2]
+    overlay = frame.copy()
+    
+    # Track unique labels for color assignment
+    label_colors: dict = {}
+    
+    for det in detections:
+        label = det.get("label", "?")
+        conf = det.get("confidence", 0)
+        bbox = det.get("bbox", [])
+        
+        if len(bbox) != 4:
+            continue
+        
+        # Assign consistent color per label
+        if label not in label_colors:
+            label_colors[label] = _COLORS[len(label_colors) % len(_COLORS)]
+        color = label_colors[label]
+        
+        # Convert normalized coords to pixel coords
+        x1 = int(bbox[0] * w)
+        y1 = int(bbox[1] * h)
+        x2 = int(bbox[2] * w)
+        y2 = int(bbox[3] * h)
+        
+        # Draw rectangle
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
+        
+        # Draw label background
+        text = f"{label} {conf:.0%}"
+        (text_w, text_h), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+        cv2.rectangle(overlay, (x1, y1 - text_h - 10), (x1 + text_w + 4, y1), color, -1)
+        
+        # Draw label text
+        cv2.putText(overlay, text, (x1 + 2, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+    
+    # Draw pose/activity info at top
+    info_text = f"Pose: {pose} ({pose_conf:.0%}) | Activity: {activity}"
+    cv2.rectangle(overlay, (0, 0), (w, 35), (0, 0, 0), -1)
+    cv2.putText(overlay, info_text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    
+    # Blend overlay with original (slight transparency for boxes)
+    return cv2.addWeighted(overlay, 0.85, frame, 0.15, 0)
 
 
 def post_frame(
@@ -218,6 +287,7 @@ def run_capture(
 
     pending: Deque[bytes] = deque(maxlen=cfg.max_queue)
     last_capture_time = 0.0
+    last_response: Optional[dict] = None
     window_name = "Capture Preview (press 'q' to quit)"
     
     if preview:
@@ -239,13 +309,6 @@ def run_capture(
 
             frame = resize_to_resolution(frame, cfg.width, cfg.height)
             
-            if preview:
-                cv2.imshow(window_name, frame)
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
-                    print("[capture] 'q' pressed, exiting.")
-                    break
-            
             now = time.time()
             if now - last_capture_time >= cfg.capture_interval_sec:
                 jpeg = frame_to_jpeg(frame, cfg.jpeg_quality)
@@ -256,16 +319,25 @@ def run_capture(
                         post_bytes=_post_bytes,
                         max_attempts_per_frame=cfg.max_attempts_per_frame,
                     )
+                    if response:
+                        last_response = response
                     if preview:
                         print(f"\n[capture] Frame sent ({len(jpeg)} bytes)")
                         if response:
                             _print_cv_result(response)
                     last_capture_time = now
             
-            if not preview:
-                time.sleep(max(0.0, cfg.capture_interval_sec))
-            else:
+            if preview:
+                # Draw bounding boxes from last response
+                display_frame = _draw_detections(frame, last_response)
+                cv2.imshow(window_name, display_frame)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q'):
+                    print("[capture] 'q' pressed, exiting.")
+                    break
                 time.sleep(0.03)  # ~30fps preview
+            else:
+                time.sleep(max(0.0, cfg.capture_interval_sec))
     finally:
         cap.release()
         if preview:

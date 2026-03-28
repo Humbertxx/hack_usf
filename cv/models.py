@@ -37,6 +37,12 @@ class Severity(str, Enum):
     INFO = "info"
 
 
+class Detection(BaseModel):
+    label: str
+    confidence: float
+    bbox: List[float]  # [x1, y1, x2, y2] normalized 0-1
+
+
 class Observation(BaseModel):
     id: str
     observed_at: datetime
@@ -46,6 +52,7 @@ class Observation(BaseModel):
     activity: ActivityType
     activity_confidence: float
     objects_detected: List[str]
+    detections: List[Detection] = []  # Full detection info with bboxes
     room_hint: str
     is_fall_risk: bool
     motion_level: MotionLevel

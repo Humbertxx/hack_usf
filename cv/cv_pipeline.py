@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
-from cv.models import ActivityType, MotionLevel, Observation, PoseType
+from cv.models import ActivityType, Detection, MotionLevel, Observation, PoseType
 
 _CACHE_DIR = Path(__file__).resolve().parent / ".cache"
 _POSE_LITE_URL = (
@@ -298,18 +298,28 @@ class CVPipeline:
             verbose=False,
         )
         raw_labels: List[str] = []
+        detections: List[Detection] = []
         person_detected = False
+        h, w = frame.shape[:2]
         if results:
             r = results[0]
             if r.boxes is not None and len(r.boxes):
                 names = r.names or {}
-                for cls, conf in zip(r.boxes.cls.tolist(), r.boxes.conf.tolist()):
+                boxes_xyxy = r.boxes.xyxy.tolist() if r.boxes.xyxy is not None else []
+                for i, (cls, conf) in enumerate(zip(r.boxes.cls.tolist(), r.boxes.conf.tolist())):
                     if conf < 0.35:
                         continue
                     name = str(names.get(int(cls), str(int(cls))))
                     raw_labels.append(name)
                     if int(cls) == 0:
                         person_detected = True
+                    # Normalize bbox to 0-1 range
+                    if i < len(boxes_xyxy):
+                        x1, y1, x2, y2 = boxes_xyxy[i]
+                        bbox = [x1 / w, y1 / h, x2 / w, y2 / h]
+                    else:
+                        bbox = [0.0, 0.0, 0.0, 0.0]
+                    detections.append(Detection(label=name, confidence=float(conf), bbox=bbox))
 
         labels = sorted({x for x in raw_labels})
 
@@ -337,6 +347,7 @@ class CVPipeline:
             activity=activity,
             activity_confidence=act_conf,
             objects_detected=sorted(labels),
+            detections=detections,
             room_hint=room_hint,
             is_fall_risk=is_fall_risk,
             motion_level=motion,
