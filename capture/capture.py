@@ -144,10 +144,13 @@ def run_capture(
     *,
     client: Optional[httpx.Client] = None,
     stop_flag: Optional[Callable[[], bool]] = None,
+    preview: bool = False,
 ) -> None:
     """
     Open default camera, capture at cfg resolution every cfg.capture_interval_sec,
     enqueue JPEGs, and flush to the server with retries.
+    
+    If preview=True, shows a live camera feed in a window. Press 'q' to quit.
     """
     stop_flag = stop_flag or (lambda: False)
     own_client = client is None
@@ -173,11 +176,19 @@ def run_capture(
         )
 
     pending: Deque[bytes] = deque(maxlen=cfg.max_queue)
+    last_capture_time = 0.0
+    window_name = "Capture Preview (press 'q' to quit)"
+    
+    if preview:
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, cfg.width, cfg.height)
+        print(f"[capture] Preview window open. Posting every {cfg.capture_interval_sec}s. Press 'q' to quit.")
+    
     try:
         while not stop_flag():
             ok, frame = cap.read()
             if not ok or frame is None:
-                time.sleep(1.0)
+                time.sleep(0.1)
                 flush_queue(
                     pending,
                     post_bytes=_post_bytes,
@@ -186,22 +197,36 @@ def run_capture(
                 continue
 
             frame = resize_to_resolution(frame, cfg.width, cfg.height)
-            jpeg = frame_to_jpeg(frame, cfg.jpeg_quality)
-            if jpeg is None:
-                time.sleep(0.5)
-                continue
-
-            pending.append(jpeg)
-            flush_queue(
-                pending,
-                post_bytes=_post_bytes,
-                max_attempts_per_frame=cfg.max_attempts_per_frame,
-            )
-
-            # Fixed cadence between successful read/send attempts.
-            time.sleep(max(0.0, cfg.capture_interval_sec))
+            
+            if preview:
+                cv2.imshow(window_name, frame)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q'):
+                    print("[capture] 'q' pressed, exiting.")
+                    break
+            
+            now = time.time()
+            if now - last_capture_time >= cfg.capture_interval_sec:
+                jpeg = frame_to_jpeg(frame, cfg.jpeg_quality)
+                if jpeg is not None:
+                    pending.append(jpeg)
+                    flush_queue(
+                        pending,
+                        post_bytes=_post_bytes,
+                        max_attempts_per_frame=cfg.max_attempts_per_frame,
+                    )
+                    if preview:
+                        print(f"[capture] Frame sent ({len(jpeg)} bytes)")
+                    last_capture_time = now
+            
+            if not preview:
+                time.sleep(max(0.0, cfg.capture_interval_sec))
+            else:
+                time.sleep(0.03)  # ~30fps preview
     finally:
         cap.release()
+        if preview:
+            cv2.destroyAllWindows()
         if own_client:
             http.close()
 
@@ -215,6 +240,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--dry-run",
         action="store_true",
         help="Verify config and camera open, then exit without posting.",
+    )
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Show a live preview window of the camera feed.",
     )
     args = parser.parse_args(argv)
 
@@ -246,7 +276,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     try:
-        run_capture(cfg, stop_flag=lambda: stop)
+        run_capture(cfg, stop_flag=lambda: stop, preview=args.preview)
     except KeyboardInterrupt:
         return 130
     except RuntimeError as e:
