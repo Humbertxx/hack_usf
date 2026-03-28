@@ -151,4 +151,4 @@ fi
 
 echo "[run_full_stack] Starting capture client (POST to ${CAPTURE_SERVER_URL})..."
 cd "$REPO_ROOT"
-"$PYTHON_BIN" -m capture.capture "${CAPTURE_ARGS[@]}"
+"$PYTHON_BIN" -m capture.capture ${CAPTURE_ARGS[@]+"${CAPTURE_ARGS[@]}"}
