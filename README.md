@@ -40,7 +40,9 @@ The script prints `nvidia-smi`, device nodes, and a `libcuda` check before impor
 
 4. **`nvidia-smi` works but `/dev/nvidia0` is missing** — Some pods only expose `/dev/nvidiaN` (e.g. `nvidia7`). If you can write under `/dev`, try `ln -sf /dev/nvidia7 /dev/nvidia0` (or `bash cv/scripts/ensure_nvidia0_alias.sh`). **`mknod` is often blocked** on managed pods; a symlink may still work.
 
-5. **Symlink `/dev/nvidia0` exists but PyTorch still says CUDA unavailable** — The problem is not only the device name. Run `python3 cv/scripts/diagnose_cuda_driver.py`: if **`cuInit` / `cuDeviceGetCount` succeed** but PyTorch fails, suspect **`LD_LIBRARY_PATH`** pulling the wrong `libcuda`/`libnvidia-*` (try `unset LD_LIBRARY_PATH` in that shell and re-test). If the driver API also errors, the pod/image/driver combo is wrong — use another RunPod **PyTorch** or **NVIDIA CUDA** template or contact support.
+5. **Symlink `/dev/nvidia0` exists but PyTorch still says CUDA unavailable** — The problem is not only the device name. Run `python3 cv/scripts/diagnose_cuda_driver.py` (it maps which `libcuda` is loaded and **re-tries once with `LD_LIBRARY_PATH` unset** if `cuInit` returns 999).
+
+6. **`LD_LIBRARY_PATH` includes `/usr/local/cuda`** — The linker may load the toolkit’s **stub** `libcuda` before the real driver in `/lib`; then **`cuInit` → CUDA_ERROR_UNKNOWN** and PyTorch shows the same. Run `unset LD_LIBRARY_PATH` (or drop the cuda entries) in the shell before Python, and fix any profile that exports it for interactive logins.
 hackaton project for 2026 HackUsf
 
 

@@ -23,6 +23,26 @@ def _cu_result_name(code: int) -> str:
     return _ERRORS.get(code, f"CUresult({code})")
 
 
+_NO_LD_RETRY_FLAG = "_CUDA_DIAG_NO_LD_RETRY"
+
+
+def _loaded_libcuda_paths() -> list[str]:
+    """Best-effort: mapped libcuda .so paths for this process (Linux)."""
+    paths: list[str] = []
+    try:
+        with open("/proc/self/maps", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if "libcuda.so" in line and " r-xp " in line:
+                    parts = line.split()
+                    if len(parts) >= 6:
+                        p = parts[-1]
+                        if p.startswith("/") and p not in paths:
+                            paths.append(p)
+    except OSError:
+        pass
+    return paths
+
+
 def _warn_visible_devices() -> None:
     raw = os.environ.get("NVIDIA_VISIBLE_DEVICES")
     if raw is None:
@@ -77,6 +97,19 @@ def main() -> int:
         print("FAILED:", e, file=sys.stderr)
         return 1
 
+    mapped = _loaded_libcuda_paths()
+    if mapped:
+        print("Mapped executable libcuda (from /proc/self/maps):")
+        for p in mapped:
+            print(" ", p)
+        if any("/usr/local/cuda" in p or "stubs" in p for p in mapped):
+            print(
+                "\nWARNING: libcuda is loading from the CUDA toolkit tree, not only the host driver.\n"
+                "         Toolkit copies are often **stubs** — cuInit then returns CUDA_ERROR_UNKNOWN.\n"
+                "         Prefer: unset LD_LIBRARY_PATH  (or remove /usr/local/cuda/... from it).\n",
+                file=sys.stderr,
+            )
+
     cu_init = lib.cuInit
     cu_init.argtypes = [c_uint]
     cu_init.restype = c_int
@@ -90,6 +123,24 @@ def main() -> int:
     if err != _CUDA_SUCCESS:
         print(
             "Driver init failed before device count — PyTorch will also fail here.",
+            file=sys.stderr,
+        )
+        if (
+            err == 999
+            and os.environ.get("LD_LIBRARY_PATH")
+            and _NO_LD_RETRY_FLAG not in os.environ
+        ):
+            print(
+                "\nRe-running this script with LD_LIBRARY_PATH unset (one automatic retry)…\n",
+                file=sys.stderr,
+            )
+            env = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
+            env[_NO_LD_RETRY_FLAG] = "1"
+            script = os.path.abspath(__file__)
+            os.execve(sys.executable, [sys.executable, script], env)
+        print(
+            "\nIf cuInit stayed failing: check /dev/nvidia*, NVIDIA_VISIBLE_DEVICES=void, pod image;\n"
+            "or run:  env -u LD_LIBRARY_PATH python3 " + os.path.abspath(__file__),
             file=sys.stderr,
         )
         return 2

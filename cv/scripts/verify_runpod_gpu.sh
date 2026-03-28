@@ -10,6 +10,11 @@ if [[ "${NVIDIA_VISIBLE_DEVICES-}" == "void" ]]; then
   echo "WARNING: NVIDIA_VISIBLE_DEVICES=void disables CUDA for PyTorch/libcuda; use:" >&2
   echo "  export NVIDIA_VISIBLE_DEVICES=all   # or: unset NVIDIA_VISIBLE_DEVICES" >&2
 fi
+if [[ "${LD_LIBRARY_PATH-}" == *cuda* ]]; then
+  echo
+  echo "NOTE: LD_LIBRARY_PATH mentions cuda. If cuInit/PyTorch fail with unknown CUDA error," >&2
+  echo "      try:  unset LD_LIBRARY_PATH   # toolkit path can load stub libcuda before the driver" >&2
+fi
 echo
 
 echo "=== NVIDIA device nodes (GPU must be passed into the container) ==="
