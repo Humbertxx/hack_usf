@@ -6,7 +6,7 @@ import pytest
 def test_cv_pipeline_processes_blank_frame(monkeypatch) -> None:
     # Pose backends may require a display/EGL (macOS CI, some headless nodes). YOLO still validates the stack.
     monkeypatch.setenv("CV_POSE_BACKEND", "none")
-    from server.cv_pipeline import CVPipeline
+    from cv.cv_pipeline import CVPipeline
 
     pipe = CVPipeline(yolo_model_name="yolov8n.pt")
     try:
@@ -22,7 +22,7 @@ def test_cv_pipeline_processes_blank_frame(monkeypatch) -> None:
 def test_device_helper_cpu_when_no_cuda() -> None:
     import torch
 
-    from server.cv_pipeline import _device
+    from cv.cv_pipeline import _device
 
     if torch.cuda.is_available():
         assert _device() == "cuda:0"

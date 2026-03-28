@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
-from server.alert_engine import AlertEngine
-from server.models import (
+from cv.alert_engine import AlertEngine
+from cv.models import (
     ActivityType,
     MotionLevel,
     Observation,

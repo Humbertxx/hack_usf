@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from server.models import Observation
+from cv.models import Observation
 
 
 def should_send(

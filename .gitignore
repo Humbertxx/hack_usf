@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
-server/.cache/
+cv/.pytest_cache/
+cv/.cache/
 *.pt
 Ultralytics/

@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
-from server.models import ActivityType, MotionLevel, Observation, PoseType
+from cv.models import ActivityType, MotionLevel, Observation, PoseType
 
 _CACHE_DIR = Path(__file__).resolve().parent / ".cache"
 _POSE_LITE_URL = (

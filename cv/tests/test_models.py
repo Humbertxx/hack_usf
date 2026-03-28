@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from server.models import (
+from cv.models import (
     ActivityType,
     Alert,
     MotionLevel,

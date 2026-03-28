@@ -6,6 +6,6 @@ torch>=2.8.0
 torchvision>=0.23.0
 
 # From repo root:
-#   pip install -r server/requirements-cuda128.lockstep.txt
+#   pip install -r cv/requirements-cuda128.lockstep.txt
 
--r server/requirements.txt
+-r cv/requirements.txt

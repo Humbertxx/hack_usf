@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 
-from server.models import (
+from cv.models import (
     ActivityType,
     MotionLevel,
     Observation,
     PoseType,
 )
-from server.noise_filter import should_send
+from cv.noise_filter import should_send
 
 
 def _obs(**overrides) -> Observation:

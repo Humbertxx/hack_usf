@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from server.models import Alert, MotionLevel, Observation, PoseType, Severity
+from cv.models import Alert, MotionLevel, Observation, PoseType, Severity
 
 
 @dataclass
