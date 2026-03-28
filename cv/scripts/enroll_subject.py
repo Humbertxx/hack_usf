@@ -34,15 +34,16 @@ def _capture_from_camera(camera_index: int, show_crop: bool = True) -> Optional[
     """
     Capture a frame from camera with interactive preview.
     
-    Shows live preview and captures when user presses SPACE.
+    Shows live preview with a centered crop guide. Only the area inside
+    the guide box will be sent for enrollment. Press SPACE to capture.
     Press ESC or Q to cancel.
     
     Args:
         camera_index: Camera device index
-        show_crop: If True, show the detected person crop after capture
+        show_crop: If True, save the cropped capture for review
     
     Returns:
-        JPEG-encoded image bytes, or None if cancelled.
+        JPEG-encoded image bytes (cropped to center), or None if cancelled.
     """
     import cv2
     
@@ -55,6 +56,7 @@ def _capture_from_camera(camera_index: int, show_crop: bool = True) -> Optional[
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
     print("\n=== Camera Capture ===")
+    print("Position yourself inside the green box")
     print("Press SPACE to capture")
     print("Press ESC or Q to cancel")
     print()
@@ -71,17 +73,65 @@ def _capture_from_camera(camera_index: int, show_crop: bool = True) -> Optional[
             display = frame.copy()
             h, w = display.shape[:2]
             
+            # Calculate centered crop box (portrait aspect ratio for person)
+            # Use 60% of frame height, portrait aspect ratio (3:4)
+            crop_h = int(h * 0.85)
+            crop_w = int(crop_h * 0.6)  # Portrait aspect ratio
+            
+            # Center the crop box
+            crop_x1 = (w - crop_w) // 2
+            crop_y1 = (h - crop_h) // 2
+            crop_x2 = crop_x1 + crop_w
+            crop_y2 = crop_y1 + crop_h
+            
+            # Dim the area outside the crop box
+            overlay = display.copy()
+            # Draw semi-transparent dark overlay on entire frame
+            cv2.rectangle(overlay, (0, 0), (w, h), (0, 0, 0), -1)
+            # Blend with original
+            cv2.addWeighted(overlay, 0.5, display, 0.5, 0, display)
+            # Restore the crop area from original frame
+            display[crop_y1:crop_y2, crop_x1:crop_x2] = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+            
+            # Draw crop guide box
+            cv2.rectangle(display, (crop_x1, crop_y1), (crop_x2, crop_y2), (0, 255, 0), 3)
+            
+            # Draw corner markers for better visibility
+            marker_len = 30
+            # Top-left
+            cv2.line(display, (crop_x1, crop_y1), (crop_x1 + marker_len, crop_y1), (0, 255, 0), 5)
+            cv2.line(display, (crop_x1, crop_y1), (crop_x1, crop_y1 + marker_len), (0, 255, 0), 5)
+            # Top-right
+            cv2.line(display, (crop_x2, crop_y1), (crop_x2 - marker_len, crop_y1), (0, 255, 0), 5)
+            cv2.line(display, (crop_x2, crop_y1), (crop_x2, crop_y1 + marker_len), (0, 255, 0), 5)
+            # Bottom-left
+            cv2.line(display, (crop_x1, crop_y2), (crop_x1 + marker_len, crop_y2), (0, 255, 0), 5)
+            cv2.line(display, (crop_x1, crop_y2), (crop_x1, crop_y2 - marker_len), (0, 255, 0), 5)
+            # Bottom-right
+            cv2.line(display, (crop_x2, crop_y2), (crop_x2 - marker_len, crop_y2), (0, 255, 0), 5)
+            cv2.line(display, (crop_x2, crop_y2), (crop_x2, crop_y2 - marker_len), (0, 255, 0), 5)
+            
+            # Instructions
             cv2.putText(
                 display,
-                "Press SPACE to capture | ESC/Q to cancel",
+                "Stand inside the box | SPACE to capture | ESC to cancel",
                 (10, h - 20),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
                 (0, 255, 0),
                 2,
             )
+            cv2.putText(
+                display,
+                "Only the area inside will be captured",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+            )
 
-            cv2.imshow("Enroll Subject - Press SPACE to capture", display)
+            cv2.imshow("Enroll Subject - Position yourself in the box", display)
 
             key = cv2.waitKey(1) & 0xFF
 
@@ -89,8 +139,9 @@ def _capture_from_camera(camera_index: int, show_crop: bool = True) -> Optional[
                 print("Capture cancelled.")
                 break
             elif key == 32:  # SPACE
-                captured_frame = frame
-                print("Frame captured!")
+                # Crop to the guide box area
+                captured_frame = frame[crop_y1:crop_y2, crop_x1:crop_x2].copy()
+                print(f"Frame captured! (cropped to {crop_w}x{crop_h})")
                 break
     finally:
         cap.release()
@@ -99,7 +150,7 @@ def _capture_from_camera(camera_index: int, show_crop: bool = True) -> Optional[
     if captured_frame is None:
         return None
 
-    # Save the captured frame for review
+    # Save the captured (cropped) frame for review
     if show_crop:
         _save_captured_preview(captured_frame)
 
