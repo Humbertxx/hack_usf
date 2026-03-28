@@ -91,6 +91,39 @@ def resize_to_resolution(frame: np.ndarray, width: int, height: int) -> np.ndarr
     return cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
 
 
+def _print_cv_result(response: dict) -> None:
+    """Print CV detection results in a readable format."""
+    filtered = response.get("filtered", False)
+    obs = response.get("observation", {})
+    alert = response.get("alert")
+    
+    if filtered:
+        print("  [filtered - no significant change]")
+        return
+    
+    pose = obs.get("pose", "unknown")
+    confidence = obs.get("confidence", 0)
+    detections = obs.get("detections", [])
+    
+    print(f"  Pose: {pose} (confidence: {confidence:.2f})")
+    
+    if detections:
+        print(f"  Detections ({len(detections)}):")
+        for det in detections[:5]:  # Show first 5
+            label = det.get("label", "?")
+            conf = det.get("confidence", 0)
+            print(f"    - {label}: {conf:.2f}")
+        if len(detections) > 5:
+            print(f"    ... and {len(detections) - 5} more")
+    else:
+        print("  No detections")
+    
+    if alert:
+        alert_type = alert.get("alert_type", "unknown")
+        message = alert.get("quick_message", "")
+        print(f"  ⚠️  ALERT: {alert_type} - {message}")
+
+
 def post_frame(
     client: httpx.Client,
     *,
@@ -99,8 +132,8 @@ def post_frame(
     session_id: str,
     in_concern_window: bool,
     timeout_sec: float,
-) -> None:
-    """POST one JPEG to /process-frame; raises httpx.HTTPError on failure."""
+) -> Optional[dict]:
+    """POST one JPEG to /process-frame; raises httpx.HTTPError on failure. Returns JSON response."""
     params = {
         "session_id": session_id,
         "in_concern_window": str(in_concern_window).lower(),
@@ -108,10 +141,14 @@ def post_frame(
     files = {"file": ("frame.jpg", jpeg_bytes, "image/jpeg")}
     response = client.post(server_url, params=params, files=files, timeout=timeout_sec)
     response.raise_for_status()
+    try:
+        return response.json()
+    except Exception:
+        return None
 
 
 class _PostBytes(Protocol):
-    def __call__(self, __jpeg: bytes) -> None: ...
+    def __call__(self, __jpeg: bytes) -> Optional[dict]: ...
 
 
 def flush_queue(
@@ -119,24 +156,28 @@ def flush_queue(
     *,
     post_bytes: _PostBytes,
     max_attempts_per_frame: int,
-) -> None:
+) -> Optional[dict]:
     """
     Drain queue by posting the front JPEG. On failure, keep it at the front and
     stop after max_attempts_per_frame so a later flush (or the next loop tick)
     can retry with backoff sleeps between attempts.
+    
+    Returns the last successful response dict, or None.
     """
     attempts = 0
+    last_response: Optional[dict] = None
     while queue:
         jpeg = queue[0]
         try:
-            post_bytes(jpeg)
+            last_response = post_bytes(jpeg)
             queue.popleft()
             attempts = 0
         except (httpx.HTTPError, OSError, ValueError):
             attempts += 1
             if attempts >= max_attempts_per_frame:
-                return
+                return last_response
             time.sleep(min(30.0, 2 ** (attempts - 1)))
+    return last_response
 
 
 def run_capture(
@@ -156,8 +197,8 @@ def run_capture(
     own_client = client is None
     http = client or httpx.Client()
 
-    def _post_bytes(jpeg_bytes: bytes) -> None:
-        post_frame(
+    def _post_bytes(jpeg_bytes: bytes) -> Optional[dict]:
+        return post_frame(
             http,
             server_url=cfg.server_url,
             jpeg_bytes=jpeg_bytes,
@@ -210,13 +251,15 @@ def run_capture(
                 jpeg = frame_to_jpeg(frame, cfg.jpeg_quality)
                 if jpeg is not None:
                     pending.append(jpeg)
-                    flush_queue(
+                    response = flush_queue(
                         pending,
                         post_bytes=_post_bytes,
                         max_attempts_per_frame=cfg.max_attempts_per_frame,
                     )
                     if preview:
-                        print(f"[capture] Frame sent ({len(jpeg)} bytes)")
+                        print(f"\n[capture] Frame sent ({len(jpeg)} bytes)")
+                        if response:
+                            _print_cv_result(response)
                     last_capture_time = now
             
             if not preview:
