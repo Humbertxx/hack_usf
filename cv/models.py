@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel
 
@@ -37,6 +37,17 @@ class Severity(str, Enum):
     INFO = "info"
 
 
+class Detection(BaseModel):
+    label: str
+    confidence: float
+    bbox: List[float]  # [x1, y1, x2, y2] normalized 0-1
+    person_id: Optional[str] = None
+    display_name: Optional[str] = None
+    is_enrolled: bool = False
+    bbox_color: Optional[str] = None
+    identity_confidence: Optional[float] = None
+
+
 class Observation(BaseModel):
     id: str
     observed_at: datetime
@@ -46,6 +57,7 @@ class Observation(BaseModel):
     activity: ActivityType
     activity_confidence: float
     objects_detected: List[str]
+    detections: List[Detection] = []  # Full detection info with bboxes
     room_hint: str
     is_fall_risk: bool
     motion_level: MotionLevel
