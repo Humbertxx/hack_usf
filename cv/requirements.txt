@@ -31,3 +31,9 @@ tensorboard
 torchreid
 # torchreid: Install separately AFTER other deps due to build dependencies:
 #   pip install --no-build-isolation git+https://github.com/KaiyangZhou/deep-person-reid.git
+
+# Snowflake: production CV server (cv.main) uses SnowflakeClient by default, so the GPU pod
+# needs these packages or startup/import will fail when flushing observations. Tests can still
+# inject MockSnowflakeClient via create_app(snowflake=...).
+snowflake-connector-python>=3.6.0
+pandas>=2.0.0

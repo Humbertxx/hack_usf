@@ -23,7 +23,46 @@ from cv.identity_store import IdentityStore
 from cv.models import Alert, Observation
 from cv.noise_filter import should_send
 from cv.reid_embeddings import ReIDEmbedder
+from cv.snowflake_client import create_snowflake_client
 from cv.websocket_manager import WebSocketManager
+
+# Minimum identity confidence required to send enrolled person data to Snowflake
+MIN_IDENTITY_CONFIDENCE = 0.7
+
+
+def should_send_to_snowflake(
+    obs: Observation,
+    prev_sent: Optional[Observation],
+    *,
+    in_concern_window: bool = False,
+) -> bool:
+    """
+    Determine if an observation should be sent to Snowflake.
+    
+    Requirements:
+    1. Must pass basic noise filter (confidence, quality thresholds)
+    2. If person detected, must be an enrolled person (Grandma/Grandpa)
+       with identity confidence >= MIN_IDENTITY_CONFIDENCE
+    
+    This ensures only high-quality, identified observations are stored.
+    """
+    if not should_send(obs, prev_sent, in_concern_window=in_concern_window):
+        return False
+    
+    # If person detected, require enrolled identity with high confidence
+    if obs.person_detected:
+        # Must have primary person identified (enrolled subject)
+        if not obs.primary_person_id:
+            print(f"[Snowflake Filter] Skipping: person detected but no enrolled identity")
+            return False
+        
+        # Must have high identity confidence
+        if obs.primary_identity_confidence is None or obs.primary_identity_confidence < MIN_IDENTITY_CONFIDENCE:
+            conf = obs.primary_identity_confidence or 0.0
+            print(f"[Snowflake Filter] Skipping: identity confidence too low ({conf:.2f} < {MIN_IDENTITY_CONFIDENCE})")
+            return False
+    
+    return True
 
 
 class MockSnowflakeClient:
@@ -32,7 +71,10 @@ class MockSnowflakeClient:
         self.alerts: list[Alert] = []
 
     def add_observation(self, obs: Observation) -> None:
-        print(f"[MOCK SNOWFLAKE] Observation: {obs.id} - {obs.pose}")
+        identity_info = ""
+        if obs.primary_person_id:
+            identity_info = f" | {obs.primary_display_name} (conf={obs.primary_identity_confidence:.2f})"
+        print(f"[MOCK SNOWFLAKE] Observation: {obs.id} - {obs.pose} - {obs.activity}{identity_info}")
         self.observations.append(obs)
 
     def add_alert(self, alert: Alert) -> None:
@@ -72,7 +114,7 @@ class SubjectListResponse(BaseModel):
 def create_app(
     *,
     pipeline_factory: Optional[Callable[[], CVPipeline]] = None,
-    snowflake: Optional[MockSnowflakeClient] = None,
+    snowflake: Optional[Any] = None,
     identity_store: Optional[IdentityStore] = None,
 ) -> FastAPI:
     store = identity_store or IdentityStore()
@@ -87,7 +129,7 @@ def create_app(
     app = FastAPI(lifespan=lifespan)
     app.state.alert_engine = AlertEngine()
     app.state.ws_manager = WebSocketManager()
-    app.state.snowflake = snowflake or MockSnowflakeClient()
+    app.state.snowflake = snowflake or create_snowflake_client()
     app.state.prev_sent: Observation | None = None
     app.state.identity_store = store
     app.state.reid_embedder: Optional[ReIDEmbedder] = None
@@ -111,7 +153,7 @@ def create_app(
         obs = app.state.pipeline.process_frame(frame, session_id=session_id)
         obs_json = obs.model_dump(mode="json")
 
-        if not should_send(
+        if not should_send_to_snowflake(
             obs,
             app.state.prev_sent,
             in_concern_window=in_concern_window,

@@ -509,6 +509,23 @@ class CVPipeline:
 
         mins_unseen = 0 if person_detected else max(0, int(minutes_since_last_seen_if_absent))
 
+        # Extract primary enrolled person (highest confidence Grandma/Grandpa)
+        primary_person_id: Optional[str] = None
+        primary_display_name: Optional[str] = None
+        primary_identity_confidence: Optional[float] = None
+        
+        best_enrolled_conf = 0.0
+        for det in detections:
+            if det.label == "person" and det.is_enrolled and det.identity_confidence is not None:
+                if det.identity_confidence > best_enrolled_conf:
+                    best_enrolled_conf = det.identity_confidence
+                    primary_person_id = det.person_id
+                    primary_display_name = det.display_name
+                    primary_identity_confidence = det.identity_confidence
+        
+        if primary_person_id:
+            print(f"[CVPipeline] Primary person: {primary_display_name} (conf={primary_identity_confidence:.3f})")
+
         return Observation(
             id=oid,
             observed_at=observed_at,
@@ -525,4 +542,7 @@ class CVPipeline:
             minutes_since_last_seen=mins_unseen,
             frame_quality=quality,
             session_id=session_id,
+            primary_person_id=primary_person_id,
+            primary_display_name=primary_display_name,
+            primary_identity_confidence=primary_identity_confidence,
         )

@@ -10,8 +10,8 @@ def should_send(
     prev_sent: Optional[Observation],
     *,
     in_concern_window: bool = False,
-    min_confidence: float = 0.5,
-    min_frame_quality: float = 0.3,
+    min_confidence: float = 0.6,
+    min_frame_quality: float = 0.4,
 ) -> bool:
     if obs.frame_quality < min_frame_quality:
         return False
