@@ -8,7 +8,7 @@ export default function NavBar() {
         <div className="flex justify-around items-center justify-center gap-10">
           <Link
             className="bg-green-100 p-2 rounded hover:scale-110 transition duration-100 ease-in"
-            href="/"
+            href="/dashboard"
           >
             Home
           </Link>
