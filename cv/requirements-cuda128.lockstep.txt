@@ -1,5 +1,9 @@
 # Single-pass install for GPU pods: CUDA 12.8 + PyTorch >= 2.8 (RTX 5090 / sm_120).
 # After: python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.version.cuda)"
+#
+# Verified (PyPI requires_dist): torchvision 0.23.0 depends on torch==2.8.0. torchvision 0.22.x on PyPI pins
+# torch 2.7.x (e.g. 0.22.0 -> torch==2.7.0, 0.22.1 -> torch==2.7.1), so it will not resolve next to torch 2.8 —
+# use torchvision >= 0.23 with this stack. Install torch + torchvision from the same cu128 index in one command.
 
 --extra-index-url https://download.pytorch.org/whl/cu128
 torch>=2.8.0

@@ -33,11 +33,16 @@ The script prints `nvidia-smi`, device nodes, and a `libcuda` check before impor
 
 1. **No `/dev/nvidia*` or `nvidia-smi` fails** — The machine is not a working GPU pod (CPU template, wrong region, or runtime did not attach the GPU). Create or restart a pod that includes an NVIDIA GPU and uses a CUDA-capable image.
 2. **`nvidia-smi` works but PyTorch still says CUDA unavailable** — Often environment or a stale session:
+   - If **`NVIDIA_VISIBLE_DEVICES=void`**, CUDA is intentionally disabled for the container stack (`cuInit` fails, PyTorch sees no GPU). Run **`export NVIDIA_VISIBLE_DEVICES=all`** or **`unset NVIDIA_VISIBLE_DEVICES`** and try again; find what reset it (`grep -r void ~/.bashrc /etc/profile /workspace 2>/dev/null`).
    - Run `echo "$CUDA_VISIBLE_DEVICES"`. If it is empty, run `unset CUDA_VISIBLE_DEVICES` (an empty value can break enumeration).
    - Stop the pod and start it again; re-open a terminal and re-run the script in the same venv.
 3. **Driver / runtime mismatch** — Very new PyTorch (cu128) needs a host driver that supports that CUDA generation. If everything else looks fine, try another RunPod PyTorch or CUDA base image, or ask support whether the node’s driver matches CUDA 12.8.
 
-4. **`nvidia-smi` works but `/dev/nvidia0` is missing** — Some pods only expose a node like `/dev/nvidia7`. Try `export NVIDIA_VISIBLE_DEVICES=all`, or stop/start the pod or pick a different GPU image; the verify script prints a note when `nvidia0` is absent.
+4. **`nvidia-smi` works but `/dev/nvidia0` is missing** — Some pods only expose `/dev/nvidiaN` (e.g. `nvidia7`). If you can write under `/dev`, try `ln -sf /dev/nvidia7 /dev/nvidia0` (or `bash cv/scripts/ensure_nvidia0_alias.sh`). **`mknod` is often blocked** on managed pods; a symlink may still work.
+
+5. **Symlink `/dev/nvidia0` exists but PyTorch still says CUDA unavailable** — The problem is not only the device name. Run `python3 cv/scripts/diagnose_cuda_driver.py` (it maps which `libcuda` is loaded and **re-tries once with `LD_LIBRARY_PATH` unset** if `cuInit` returns 999).
+
+6. **`LD_LIBRARY_PATH` includes `/usr/local/cuda`** — The linker may load the toolkit’s **stub** `libcuda` before the real driver in `/lib`; then **`cuInit` → CUDA_ERROR_UNKNOWN** and PyTorch shows the same. Run `unset LD_LIBRARY_PATH` (or drop the cuda entries) in the shell before Python, and fix any profile that exports it for interactive logins.
 hackaton project for 2026 HackUsf
 
 

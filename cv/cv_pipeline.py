@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import os
+import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.request import urlretrieve
 
 import cv2
@@ -14,7 +15,7 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
-from cv.models import ActivityType, MotionLevel, Observation, PoseType
+from cv.models import ActivityType, Detection, MotionLevel, Observation, PoseType
 
 _CACHE_DIR = Path(__file__).resolve().parent / ".cache"
 _POSE_LITE_URL = (
@@ -151,47 +152,81 @@ class _PoseHandles:
     video_ms: int = 0
 
 
+def _legacy_pose_handle() -> _PoseHandles:
+    legacy = mp.solutions.pose.Pose(
+        static_image_mode=False,
+        model_complexity=1,
+        enable_segmentation=False,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+    return _PoseHandles(backend="legacy", legacy=legacy)
+
+
+def _tasks_pose_handle() -> _PoseHandles:
+    from mediapipe.tasks import python
+    from mediapipe.tasks.python import vision
+
+    model_path = _ensure_pose_model()
+    options = vision.PoseLandmarkerOptions(
+        base_options=python.BaseOptions(
+            model_asset_path=str(model_path),
+            delegate=python.BaseOptions.Delegate.CPU,
+        ),
+        running_mode=vision.RunningMode.VIDEO,
+        num_poses=1,
+        min_pose_detection_confidence=0.5,
+        min_pose_presence_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+    landmarker = vision.PoseLandmarker.create_from_options(options)
+    return _PoseHandles(backend="tasks", landmarker=landmarker)
+
+
 def _build_pose_handles(backend_pref: str) -> _PoseHandles:
     pref = (backend_pref or "auto").strip().lower()
     if pref == "none":
         return _PoseHandles(backend="none")
 
-    if pref in ("auto", "legacy") and hasattr(mp, "solutions") and hasattr(mp.solutions, "pose"):
-        legacy = mp.solutions.pose.Pose(
-            static_image_mode=False,
-            model_complexity=1,
-            enable_segmentation=False,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
-        return _PoseHandles(backend="legacy", legacy=legacy)
+    can_legacy = hasattr(mp, "solutions") and hasattr(mp.solutions, "pose")
 
     if pref == "legacy":
-        raise RuntimeError(
-            "CV_POSE_BACKEND=legacy but mediapipe.solutions.pose is not available "
-            "(common on Python 3.13+ wheels). Use Python 3.10–3.12, or CV_POSE_BACKEND=tasks, or none."
-        )
+        if not can_legacy:
+            raise RuntimeError(
+                "CV_POSE_BACKEND=legacy but mediapipe.solutions.pose is not available "
+                "(common on Python 3.13+ wheels). Use Python 3.10–3.12, or CV_POSE_BACKEND=tasks, or none."
+            )
+        return _legacy_pose_handle()
+
+    if pref == "auto" and can_legacy:
+        try:
+            return _legacy_pose_handle()
+        except Exception:
+            pass
 
     if pref in ("auto", "tasks"):
-        from mediapipe.tasks import python
-        from mediapipe.tasks.python import vision
-
-        model_path = _ensure_pose_model()
-        options = vision.PoseLandmarkerOptions(
-            base_options=python.BaseOptions(
-                model_asset_path=str(model_path),
-                delegate=python.BaseOptions.Delegate.CPU,
-            ),
-            running_mode=vision.RunningMode.VIDEO,
-            num_poses=1,
-            min_pose_detection_confidence=0.5,
-            min_pose_presence_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
-        landmarker = vision.PoseLandmarker.create_from_options(options)
-        return _PoseHandles(backend="tasks", landmarker=landmarker)
+        try:
+            return _tasks_pose_handle()
+        except OSError as exc:
+            # Tasks API loads mediapipe .so's that link libGLESv2 (often absent in headless GPU containers).
+            if pref == "tasks":
+                raise RuntimeError(
+                    "MediaPipe tasks pose failed to load native libraries (typical: missing libGLESv2.so.2). "
+                    "On Debian/Ubuntu: apt-get install -y libgles2-mesa "
+                    "or set CV_POSE_BACKEND=legacy (if available) or none. "
+                    f"Original error: {exc}"
+                ) from exc
+            return _PoseHandles(backend="none")
 
     return _PoseHandles(backend="none")
+
+
+@dataclass
+class _VisitorEntry:
+    """Tracks an anonymous visitor with embedding and timestamp."""
+    embedding: np.ndarray
+    last_seen: float  # time.time()
+    visitor_id: str
 
 
 def _extract_landmarks_rgb(
@@ -228,26 +263,180 @@ def _extract_landmarks_rgb(
 
 
 class CVPipeline:
+    VISITOR_BUFFER_SIZE = 50
+    VISITOR_TTL_SECONDS = 300  # 5 minutes
+
     def __init__(
         self,
         yolo_model_name: str = "yolov8n.pt",
         *,
         pose_backend: Optional[str] = None,
+        identity_store: Optional[Any] = None,
     ) -> None:
         self._device = _device()
         self.yolo_model = YOLO(yolo_model_name)
         pref = pose_backend if pose_backend is not None else os.environ.get("CV_POSE_BACKEND", "auto")
-        try:
-            self._pose = _build_pose_handles(pref)
-        except RuntimeError:
-            self._pose = _PoseHandles(backend="none")
+        self._pose = _build_pose_handles(pref)
         self._prev_kp: Optional[np.ndarray] = None
+
+        self._identity_store = identity_store
+        self._reid_embedder: Optional[Any] = None
+        self._visitor_buffer: List[_VisitorEntry] = []
+        self._visitor_counter = 0
+
+        if identity_store is not None:
+            from cv.reid_embeddings import ReIDEmbedder
+            self._reid_embedder = ReIDEmbedder()
+            print(f"[CVPipeline] ReID enabled. Identity store has {identity_store.count} enrolled subjects.")
+        else:
+            print("[CVPipeline] WARNING: No identity store provided - ReID matching disabled!")
 
     def close(self) -> None:
         if self._pose.backend == "legacy" and self._pose.legacy is not None:
             self._pose.legacy.close()
         if self._pose.backend == "tasks" and self._pose.landmarker is not None:
             self._pose.landmarker.close()
+
+    def _crop_person(
+        self,
+        frame: np.ndarray,
+        bbox: List[float],
+        padding: float = 0.05,
+    ) -> np.ndarray:
+        """
+        Crop a person from the frame using normalized bbox coordinates.
+        
+        Args:
+            frame: BGR image (HxWx3)
+            bbox: Normalized [x1, y1, x2, y2] in 0-1 range
+            padding: Extra padding around the bbox (fraction of bbox size)
+            
+        Returns:
+            Cropped BGR image of the person.
+        """
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = bbox
+        
+        bw = x2 - x1
+        bh = y2 - y1
+        x1 = max(0, x1 - bw * padding)
+        y1 = max(0, y1 - bh * padding)
+        x2 = min(1, x2 + bw * padding)
+        y2 = min(1, y2 + bh * padding)
+        
+        px1 = int(x1 * w)
+        py1 = int(y1 * h)
+        px2 = int(x2 * w)
+        py2 = int(y2 * h)
+        
+        px1 = max(0, min(px1, w - 1))
+        py1 = max(0, min(py1, h - 1))
+        px2 = max(px1 + 1, min(px2, w))
+        py2 = max(py1 + 1, min(py2, h))
+        
+        return frame[py1:py2, px1:px2].copy()
+
+    def _cleanup_visitor_buffer(self) -> None:
+        """Remove expired visitor entries from the buffer."""
+        now = time.time()
+        self._visitor_buffer = [
+            v for v in self._visitor_buffer
+            if now - v.last_seen < self.VISITOR_TTL_SECONDS
+        ]
+        while len(self._visitor_buffer) > self.VISITOR_BUFFER_SIZE:
+            self._visitor_buffer.pop(0)
+
+    def _assign_visitor_id(
+        self,
+        embedding: np.ndarray,
+        threshold: float = 0.65,
+    ) -> str:
+        """
+        Assign a visitor ID for a non-enrolled person.
+        
+        Matches against recent visitor embeddings for session-level tracking.
+        Creates a new visitor ID if no match found.
+        
+        Args:
+            embedding: 512-dim normalized embedding
+            threshold: Similarity threshold for matching
+            
+        Returns:
+            Visitor ID like "visitor_1", "visitor_2", etc.
+        """
+        self._cleanup_visitor_buffer()
+        
+        best_match: Optional[_VisitorEntry] = None
+        best_score = threshold
+        
+        for entry in self._visitor_buffer:
+            sim = float(np.dot(embedding.flatten(), entry.embedding.flatten()))
+            if sim > best_score:
+                best_score = sim
+                best_match = entry
+        
+        if best_match is not None:
+            best_match.last_seen = time.time()
+            best_match.embedding = embedding
+            return best_match.visitor_id
+        
+        self._visitor_counter += 1
+        visitor_id = f"visitor_{self._visitor_counter}"
+        
+        self._visitor_buffer.append(_VisitorEntry(
+            embedding=embedding,
+            last_seen=time.time(),
+            visitor_id=visitor_id,
+        ))
+        
+        return visitor_id
+
+    def _enrich_person_detection(
+        self,
+        frame: np.ndarray,
+        detection: Detection,
+    ) -> None:
+        """
+        Enrich a person detection with identity information.
+        
+        Extracts embedding, matches against enrolled subjects,
+        and updates detection fields in-place.
+        """
+        if self._reid_embedder is None or self._identity_store is None:
+            return
+        
+        try:
+            crop = self._crop_person(frame, detection.bbox)
+            if crop.size == 0 or crop.shape[0] < 10 or crop.shape[1] < 10:
+                return
+            
+            embedding = self._reid_embedder.extract_embedding(crop)
+            
+            # Debug: compute similarity scores against all enrolled subjects
+            match = self._identity_store.match(embedding, threshold=0.65)
+            debug_match = self._identity_store.match(embedding, threshold=0.0)
+            if debug_match:
+                debug_id, debug_sim = debug_match
+                print(f"[ReID Debug] Best match: {debug_id} with similarity {debug_sim:.3f} (threshold: 0.65)")
+            
+            if match:
+                subject_id, similarity = match
+                subject = self._identity_store.get(subject_id)
+                if subject:
+                    detection.person_id = subject_id
+                    detection.display_name = subject.display_name
+                    detection.is_enrolled = True
+                    detection.bbox_color = subject.color
+                    detection.identity_confidence = similarity
+                    print(f"[ReID] MATCHED: {subject.display_name} (sim={similarity:.3f})")
+            else:
+                detection.person_id = self._assign_visitor_id(embedding)
+                detection.is_enrolled = False
+                detection.bbox_color = "#808080"  # Gray for visitors
+                detection.identity_confidence = None
+                print(f"[ReID] No match above threshold, assigned: {detection.person_id}")
+        except Exception as e:
+            print(f"[ReID] Error during enrichment: {e}")
 
     def process_frame(
         self,
@@ -275,18 +464,33 @@ class CVPipeline:
             verbose=False,
         )
         raw_labels: List[str] = []
+        detections: List[Detection] = []
         person_detected = False
+        h, w = frame.shape[:2]
         if results:
             r = results[0]
             if r.boxes is not None and len(r.boxes):
                 names = r.names or {}
-                for cls, conf in zip(r.boxes.cls.tolist(), r.boxes.conf.tolist()):
+                boxes_xyxy = r.boxes.xyxy.tolist() if r.boxes.xyxy is not None else []
+                for i, (cls, conf) in enumerate(zip(r.boxes.cls.tolist(), r.boxes.conf.tolist())):
                     if conf < 0.35:
                         continue
                     name = str(names.get(int(cls), str(int(cls))))
                     raw_labels.append(name)
-                    if int(cls) == 0:
+                    is_person = int(cls) == 0
+                    if is_person:
                         person_detected = True
+                    if i < len(boxes_xyxy):
+                        x1, y1, x2, y2 = boxes_xyxy[i]
+                        bbox = [x1 / w, y1 / h, x2 / w, y2 / h]
+                    else:
+                        bbox = [0.0, 0.0, 0.0, 0.0]
+                    detection = Detection(label=name, confidence=float(conf), bbox=bbox)
+                    if is_person:
+                        print(f"[CVPipeline] Person detected, running ReID enrichment...")
+                        self._enrich_person_detection(frame, detection)
+                        print(f"[CVPipeline] After enrichment: person_id={detection.person_id}, display_name={detection.display_name}")
+                    detections.append(detection)
 
         labels = sorted({x for x in raw_labels})
 
@@ -314,6 +518,7 @@ class CVPipeline:
             activity=activity,
             activity_confidence=act_conf,
             objects_detected=sorted(labels),
+            detections=detections,
             room_hint=room_hint,
             is_fall_risk=is_fall_risk,
             motion_level=motion,
