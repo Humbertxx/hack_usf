@@ -15,7 +15,11 @@ import numpy as np
 
 # Defaults per WORKSTREAM_A_CV_SETUP.md Phase 4.1
 RESOLUTION = (1920, 1080)
+<<<<<<< HEAD
 CAPTURE_INTERVAL = 2  # seconds
+=======
+CAPTURE_INTERVAL = 5  # seconds
+>>>>>>> da8c023 (Improved models and resolution to achieve better quality frames)
 JPEG_QUALITY = 95
 SERVER_URL = "http://localhost:8080/process-frame"
 
