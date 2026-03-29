@@ -27,7 +27,7 @@ export default function NavBar() {
       className="flex w-full items-center justify-center border-b border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-4 py-4 shadow-sm backdrop-blur-md md:justify-between md:px-10"
       aria-label="Main"
     >
-      <div className="text-page-title text-lg md:text-xl">How&apos;s Grandma?</div>
+      <div className="text-page-title text-lg md:text-xl">ElderWatch</div>
       <div className="mt-3 flex flex-wrap items-center justify-center gap-3 md:mt-0 md:gap-4">
         {items.map(({ href, label }) => {
           const active =
