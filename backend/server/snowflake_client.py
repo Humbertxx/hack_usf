@@ -1,7 +1,7 @@
 import os
-import uuid
+import json
 from datetime import datetime, timezone
-from typing import List
+from typing import Any, List, Optional
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 from snowflake.connector.constants import PARAMETER_PYTHON_CONNECTOR_QUERY_RESULT_FORMAT
@@ -11,15 +11,52 @@ from config import MAX_LIMIT
 
 # remember init in class is related to .env
 
-class SnowflakeClient: 
+
+def _normalize_objects_detected(value: Any) -> str:
+    if value is None:
+        return "[]"
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return "[]"
+        try:
+            decoded = json.loads(stripped)
+        except json.JSONDecodeError:
+            return json.dumps([stripped])
+        return json.dumps(decoded)
+    if isinstance(value, (list, tuple)):
+        return json.dumps(list(value))
+    return json.dumps([value])
+
+
+def _decode_variant_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        try:
+            decoded = json.loads(stripped)
+        except json.JSONDecodeError:
+            return [stripped]
+        if isinstance(decoded, list):
+            return [str(item) for item in decoded]
+        return [str(decoded)]
+    return [str(value)]
+
+
+class SnowflakeClient:
     def __init__(self):
         self.conn = snowflake.connector.connect(
             account=os.getenv('SNOWFLAKE_ACCOUNT'),
             user=os.getenv('SNOWFLAKE_USER'),
             password=os.getenv('SNOWFLAKE_PASSWORD'),
-            warehouse=os.getenv('SNOWFLAKE_WAREHOUSE'),
-            database=os.getenv('SNOWFLAKE_DATABASE'),
-            schema=os.getenv('SNOWFLAKE_SCHEMA'),
+            warehouse=os.getenv('SNOWFLAKE_WAREHOUSE', 'COMPUTE_WH'),
+            database=os.getenv('SNOWFLAKE_DATABASE', 'GRANDMA_MONITOR'),
+            schema=os.getenv('SNOWFLAKE_SCHEMA', 'PUBLIC'),
             session_parameters={
                 "PYTHON_CONNECTOR_QUERY_RESULT_FORMAT": "JSON"
             }
@@ -39,11 +76,14 @@ class SnowflakeClient:
             'ID': obs.id,
             'OBSERVED_AT': observed_at,
             'PERSON_DETECTED': obs.person_detected,
+            'PRIMARY_PERSON_ID': getattr(obs, 'primary_person_id', None),
+            'PRIMARY_DISPLAY_NAME': getattr(obs, 'primary_display_name', None),
+            'IDENTITY_CONFIDENCE': getattr(obs, 'primary_identity_confidence', None),
             'POSE': obs.pose.value if hasattr(obs.pose, 'value') else obs.pose,
             'POSE_CONFIDENCE': obs.pose_confidence,
             'ACTIVITY': obs.activity.value if hasattr(obs.activity, 'value') else obs.activity,
             'ACTIVITY_CONFIDENCE': obs.activity_confidence,
-            'OBJECTS_DETECTED': obs.objects_detected,
+            'OBJECTS_DETECTED': _normalize_objects_detected(obs.objects_detected),
             'ROOM_HINT': obs.room_hint,
             'IS_FALL_RISK': obs.is_fall_risk,
             'MOTION_LEVEL': obs.motion_level.value if hasattr(obs.motion_level, 'value') else obs.motion_level,
@@ -77,9 +117,6 @@ class SnowflakeClient:
     
     def flush(self):
         """Write buffered data to Snowflake."""
-        
-        cursor = self.conn.cursor()
-        
         try:
             # Flush observations
             if self.observation_buffer:
@@ -112,8 +149,6 @@ class SnowflakeClient:
         except Exception as e:
             print(f"[SNOWFLAKE ERROR] Flush failed: {e}")
             raise
-        finally:
-            cursor.close()
     
     def check_flush_needed(self):
         """Check if time-based flush is needed."""
@@ -122,7 +157,7 @@ class SnowflakeClient:
             self.flush()
         
     # mark alert as acknowledge
-    def update_alert_acknowledged(self, alert_id: str, acknowledged_by: str):
+    def update_alert_acknowledged(self, alert_id: str, acknowledged_by: Optional[str]):
         cursor = self.conn.cursor()
         try:
             cursor.execute("""
@@ -139,11 +174,14 @@ class SnowflakeClient:
     def get_recent_observations(self, limit: int = MAX_LIMIT) -> List[dict]:
         cursor = self.conn.cursor()
         try:
-            cursor.execute(f"""
+            cursor.execute("""
                 SELECT
                     ID,
                     TO_VARCHAR(OBSERVED_AT) AS OBSERVED_AT,
                     PERSON_DETECTED,
+                    PRIMARY_PERSON_ID,
+                    PRIMARY_DISPLAY_NAME,
+                    IDENTITY_CONFIDENCE,
                     POSE,
                     POSE_CONFIDENCE,
                     ACTIVITY,
@@ -161,33 +199,148 @@ class SnowflakeClient:
                 LIMIT %s
             """, (limit,), _statement_params={PARAMETER_PYTHON_CONNECTOR_QUERY_RESULT_FORMAT: "JSON"})
             columns = [col[0] for col in cursor.description]
+            rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            for row in rows:
+                row["OBJECTS_DETECTED"] = _decode_variant_list(row.get("OBJECTS_DETECTED"))
+            return rows
+        finally:
+            cursor.close()
+
+    def get_recent_alerts(self, limit: int = MAX_LIMIT) -> List[dict]:
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT
+                    a.ID,
+                    a.OBSERVATION_ID,
+                    a.ALERT_TYPE,
+                    a.SEVERITY,
+                    TO_VARCHAR(a.TRIGGERED_AT) AS TRIGGERED_AT,
+                    a.QUICK_MESSAGE,
+                    a.ACKNOWLEDGED,
+                    TO_VARCHAR(a.ACKNOWLEDGED_AT) AS ACKNOWLEDGED_AT,
+                    a.ACKNOWLEDGED_BY,
+                    TO_VARCHAR(a.INSERTED_AT) AS INSERTED_AT,
+                    o.PRIMARY_PERSON_ID,
+                    o.PRIMARY_DISPLAY_NAME
+                FROM ALERTS a
+                LEFT JOIN RAW_OBSERVATIONS o ON o.ID = a.OBSERVATION_ID
+                ORDER BY a.TRIGGERED_AT DESC
+                LIMIT %s
+            """, (limit,), _statement_params={PARAMETER_PYTHON_CONNECTOR_QUERY_RESULT_FORMAT: "JSON"})
+            columns = [col[0] for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
         finally:
             cursor.close()
+
     # ackowledgement alert for dashboard
     def get_unacknowledged_alerts(self) -> List[dict]:
         cursor = self.conn.cursor()
         try:
             cursor.execute("""
                 SELECT
-                    ID,
-                    OBSERVATION_ID,
-                    ALERT_TYPE,
-                    SEVERITY,
-                    TO_VARCHAR(TRIGGERED_AT) AS TRIGGERED_AT,
-                    QUICK_MESSAGE,
-                    ACKNOWLEDGED,
-                    TO_VARCHAR(ACKNOWLEDGED_AT) AS ACKNOWLEDGED_AT,
-                    ACKNOWLEDGED_BY,
-                    TO_VARCHAR(INSERTED_AT) AS INSERTED_AT
-                FROM ALERTS 
-                WHERE ACKNOWLEDGED = FALSE 
-                ORDER BY TRIGGERED_AT DESC
+                    a.ID,
+                    a.OBSERVATION_ID,
+                    a.ALERT_TYPE,
+                    a.SEVERITY,
+                    TO_VARCHAR(a.TRIGGERED_AT) AS TRIGGERED_AT,
+                    a.QUICK_MESSAGE,
+                    a.ACKNOWLEDGED,
+                    TO_VARCHAR(a.ACKNOWLEDGED_AT) AS ACKNOWLEDGED_AT,
+                    a.ACKNOWLEDGED_BY,
+                    TO_VARCHAR(a.INSERTED_AT) AS INSERTED_AT,
+                    o.PRIMARY_PERSON_ID,
+                    o.PRIMARY_DISPLAY_NAME
+                FROM ALERTS a
+                LEFT JOIN RAW_OBSERVATIONS o ON o.ID = a.OBSERVATION_ID
+                WHERE a.ACKNOWLEDGED = FALSE
+                ORDER BY a.TRIGGERED_AT DESC
             """,_statement_params={PARAMETER_PYTHON_CONNECTOR_QUERY_RESULT_FORMAT: "JSON"})
             columns = [col[0] for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
         finally:
             cursor.close()
+
+    def get_live_status_snapshot(
+        self,
+        *,
+        person_id: str,
+        lookback_minutes: int = 30,
+    ) -> Optional[dict]:
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT
+                    PRIMARY_PERSON_ID,
+                    PRIMARY_DISPLAY_NAME,
+                    TO_VARCHAR(OBSERVED_AT) AS OBSERVED_AT,
+                    DATEDIFF('minute', OBSERVED_AT, CURRENT_TIMESTAMP()) AS MINUTES_AGO,
+                    POSE,
+                    ACTIVITY,
+                    ROOM_HINT,
+                    MOTION_LEVEL,
+                    IS_FALL_RISK,
+                    MINUTES_SINCE_LAST_SEEN,
+                    OBJECTS_DETECTED,
+                    FRAME_QUALITY,
+                    IDENTITY_CONFIDENCE
+                FROM RAW_OBSERVATIONS
+                WHERE PRIMARY_PERSON_ID = %s
+                  AND DATEDIFF('minute', OBSERVED_AT, CURRENT_TIMESTAMP()) <= %s
+                ORDER BY OBSERVED_AT DESC
+                LIMIT 1
+            """, (person_id, lookback_minutes), _statement_params={PARAMETER_PYTHON_CONNECTOR_QUERY_RESULT_FORMAT: "JSON"})
+            row = cursor.fetchone()
+            if row is None:
+                return None
+
+            columns = [col[0] for col in cursor.description]
+            record = dict(zip(columns, row))
+            latest_observation = {
+                "person_id": record.get("PRIMARY_PERSON_ID"),
+                "display_name": record.get("PRIMARY_DISPLAY_NAME"),
+                "observed_at": record.get("OBSERVED_AT"),
+                "minutes_ago": record.get("MINUTES_AGO"),
+                "pose": record.get("POSE"),
+                "activity": record.get("ACTIVITY"),
+                "room_hint": record.get("ROOM_HINT"),
+                "motion_level": record.get("MOTION_LEVEL"),
+                "is_fall_risk": record.get("IS_FALL_RISK"),
+                "minutes_since_last_seen": record.get("MINUTES_SINCE_LAST_SEEN"),
+                "objects_detected": _decode_variant_list(record.get("OBJECTS_DETECTED")),
+                "frame_quality": record.get("FRAME_QUALITY"),
+                "identity_confidence": record.get("IDENTITY_CONFIDENCE"),
+            }
+
+            cursor.execute("""
+                SELECT
+                    a.ID,
+                    a.OBSERVATION_ID,
+                    a.ALERT_TYPE,
+                    a.SEVERITY,
+                    TO_VARCHAR(a.TRIGGERED_AT) AS TRIGGERED_AT,
+                    a.QUICK_MESSAGE,
+                    a.ACKNOWLEDGED
+                FROM ALERTS a
+                LEFT JOIN RAW_OBSERVATIONS o ON o.ID = a.OBSERVATION_ID
+                WHERE o.PRIMARY_PERSON_ID = %s
+                  AND DATEDIFF('minute', a.TRIGGERED_AT, CURRENT_TIMESTAMP()) <= %s
+                ORDER BY a.TRIGGERED_AT DESC
+                LIMIT 1
+            """, (person_id, lookback_minutes), _statement_params={PARAMETER_PYTHON_CONNECTOR_QUERY_RESULT_FORMAT: "JSON"})
+            alert_row = cursor.fetchone()
+            latest_alert = None
+            if alert_row is not None:
+                alert_columns = [col[0] for col in cursor.description]
+                latest_alert = dict(zip(alert_columns, alert_row))
+
+            return {
+                "latest_observation": latest_observation,
+                "latest_alert": latest_alert,
+            }
+        finally:
+            cursor.close()
+
     # flush the remaining data and close connection
     def close(self):
         self.flush()

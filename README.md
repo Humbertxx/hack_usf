@@ -2,22 +2,108 @@
 
 Hackathon project for 2026 Hack USF.
 
-## Layout
+## What lives where
 
-| Directory | Role |
-|-----------|------|
-| **`backend/`** | API and shared backend services (non-CV). |
-| **`cv/`** | Computer vision: models, pipeline, FastAPI entry (future), requirements, tests, RunPod GPU check script. |
-| **`frontend/`** | Web client. |
+| Area | Role |
+|------|------|
+| **`frontend/`** | Next.js 16 app. Dev server on port **3000**. The enrollment UI talks to the CV API via Next **Route Handlers** (for example `app/api/enroll/route.ts` forwards `POST` to the CV server so the browser avoids CORS issues). Those handlers default to **`http://localhost:8080`**. |
+| **`backend/`** | FastAPI-oriented modules (API shapes, models, Snowflake client, WebSocket helpers). There is **no separate “run the backend”** process in this repo yet; the **live HTTP API for enrollment and subjects is the CV app** in `cv/main.py`. |
+| **`cv/`** | Computer vision pipeline and **FastAPI** app (`cv.main:app`): `/health`, `/enroll-subject`, `/subjects`, WebSocket `/ws`, etc. Dependencies in `cv/requirements.txt`; tests and GPU scripts under `cv/`. |
 
-CV tests run from the `cv/` folder so imports resolve (`pythonpath` = repo root). Example:
+Other top-level folders (not exhaustive): **`capture/`** — Pi capture and RunPod/SSH helpers; **`shared/`** — types for frontend/backend; **`infra/`**, **`data/`**, **`scripts/`** — deployment and dev utilities.
+
+CV tests expect imports from the repo root (`pythonpath` = repo root):
 
 ```bash
 pip install -r cv/requirements-dev.txt
 cd cv && python -m pytest
 ```
 
-RunPod (CUDA 12.8, PyTorch ≥ 2.8), from repository root:
+---
+
+## Run the frontend (local)
+
+From `frontend/`:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). Enrollment and related flows expect a CV server (or tunnel) on **port 8080** on your Mac, because the Next API route proxies to `http://localhost:8080`.
+
+---
+
+## Run the CV server (Python venv)
+
+From the **repository root** (so `cv` imports work as a package):
+
+```bash
+cd /path/to/hack_usf
+
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
+pip install --upgrade pip
+pip install -r cv/requirements.txt
+# torchreid often needs a separate install (see comments at bottom of cv/requirements.txt), e.g.:
+# pip install --no-build-isolation git+https://github.com/KaiyangZhou/deep-person-reid.git
+```
+
+Optional: copy or symlink **`.env`** at the repo root if you use Snowflake from the CV app (credentials are documented in `my-docs/DB_SNOWFLAKE_CONFIG.md`).
+
+Start the API (same shell, venv activated, cwd = repo root):
+
+```bash
+uvicorn cv.main:app --host 0.0.0.0 --port 8080
+```
+
+Check [http://127.0.0.1:8080/health](http://127.0.0.1:8080/health). On a **GPU pod** (e.g. RunPod), install the CUDA PyTorch stack first — see comments in `cv/requirements.txt` and the RunPod section below.
+
+---
+
+## SSH tunnel from MacBook → CV server (remote testing)
+
+When the FastAPI app runs on a **remote** machine (GPU pod) and listens on **8080** (often only on `127.0.0.1` there), forward remote **8080** to your Mac’s **8080** so the Next.js app and `app/api/enroll/route.ts` keep using `http://localhost:8080`.
+
+### 1. Configure RunPod / SSH
+
+Copy `capture/runpod.env.example` to `capture/runpod.env` and set at least:
+
+- **`RUNPOD_IP`** — host that supports **local port forwarding** (`ssh -L`). **Not** `ssh.runpod.io` for `-L` (that gateway does not support it).
+- **`RUNPOD_PORT`** — SSH port.
+- Optional: **`RUNPOD_SSH_USER`**, **`RUNPOD_SSH_IDENTITY`**, **`LOCAL_PORT`** / **`REMOTE_PORT`** (defaults **8080**).
+
+If you only have RunPod’s HTTP proxy URL, use that URL from clients instead of a tunnel, or use a pod with direct SSH — see comments in `capture/autossh_setup.sh` and `capture/run_full_stack.sh`.
+
+### 2. Persistent tunnel with autossh (recommended)
+
+```bash
+brew install autossh
+cd /path/to/hack_usf
+./capture/autossh_setup.sh
+```
+
+That runs something equivalent to: local **8080** → remote **`127.0.0.1:8080`** (adjust with `LOCAL_PORT` / `REMOTE_PORT`). Leave the process running while you test.
+
+### 3. One-shot SSH (no autossh)
+
+Replace placeholders with values from `capture/runpod.env`:
+
+```bash
+ssh -N -L 8080:127.0.0.1:8080 -p RUNPOD_PORT RUNPOD_SSH_USER@RUNPOD_IP
+```
+
+### 4. End-to-end dev loop
+
+1. On the remote host (or locally): `uvicorn cv.main:app --host 0.0.0.0 --port 8080` (or bind to `127.0.0.1` if you only ever reach it via tunnel).
+2. On the Mac: tunnel as above so **localhost:8080** hits the remote API.
+3. On the Mac: `cd frontend && npm run dev` → use the web app; enrollment hits Next, which proxies to **localhost:8080**.
+
+---
+
+## RunPod (CUDA 12.8, PyTorch ≥ 2.8), from repository root
 
 ```bash
 python3 -m venv .venv
@@ -43,11 +129,20 @@ The script prints `nvidia-smi`, device nodes, and a `libcuda` check before impor
 5. **Symlink `/dev/nvidia0` exists but PyTorch still says CUDA unavailable** — The problem is not only the device name. Run `python3 cv/scripts/diagnose_cuda_driver.py` (it maps which `libcuda` is loaded and **re-tries once with `LD_LIBRARY_PATH` unset** if `cuInit` returns 999).
 
 6. **`LD_LIBRARY_PATH` includes `/usr/local/cuda`** — The linker may load the toolkit’s **stub** `libcuda` before the real driver in `/lib`; then **`cuInit` → CUDA_ERROR_UNKNOWN** and PyTorch shows the same. Run `unset LD_LIBRARY_PATH` (or drop the cuda entries) in the shell before Python, and fix any profile that exports it for interactive logins.
-hackaton project for 2026 HackUsf
 
+---
 
-infra --> for Docker, deployment, and server setup
-pi -->  for the Raspberry Pi capture script
-shared --> types/schemas used by backend + frontend (observations, alerts)
-data --> for SQLite/db artifacts (if you keep them in repo for dev)
-scripts --> setup/dev helpers (seed data, run all services)
+## Layout (quick reference)
+
+| Directory | Role |
+|-----------|------|
+| **`backend/`** | API modules, models, services (non-CV); no standalone server entry in-repo. |
+| **`cv/`** | Computer vision: models, pipeline, **FastAPI** `cv.main`, requirements, tests, RunPod GPU check script. |
+| **`frontend/`** | Web client (Next.js). |
+| **`infra/`** | Docker, deployment, server setup. |
+| **`capture/`** | Raspberry Pi capture script; RunPod/SSH helpers (`autossh_setup.sh`, `run_full_stack.sh`). |
+| **`shared/`** | Types/schemas used by backend + frontend (observations, alerts). |
+| **`data/`** | SQLite/db artifacts (if kept in repo for dev). |
+| **`scripts/`** | Setup/dev helpers. |
+
+More detail on enrollment HTTP contracts: `my-docs/FRONTEND_CV_ENROLLMENT_API.md`.
