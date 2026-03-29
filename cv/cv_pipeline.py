@@ -97,9 +97,22 @@ def _frame_quality_score(
         best_roi_score = _laplacian_quality(best_roi_var)
 
     used_roi = best_roi_area_ratio > 0.0
+    roi_weight = 0.0
     if used_roi:
-        # Prioritize person clarity over background texture.
-        quality = float(max(0.0, min(1.0, (0.75 * best_roi_score) + (0.25 * frame_score))))
+        # Prioritize person clarity over background texture. Increase ROI emphasis
+        # as the subject occupies more of the frame.
+        if best_roi_area_ratio >= 0.25:
+            roi_weight = 0.95
+        elif best_roi_area_ratio >= 0.15:
+            roi_weight = 0.90
+        else:
+            roi_weight = 0.75
+        quality = float(
+            max(
+                0.0,
+                min(1.0, (roi_weight * best_roi_score) + ((1.0 - roi_weight) * frame_score)),
+            )
+        )
     else:
         quality = frame_score
 
@@ -109,6 +122,7 @@ def _frame_quality_score(
         "roi_var": best_roi_var,
         "roi_score": best_roi_score,
         "roi_area_ratio": best_roi_area_ratio,
+        "roi_weight": roi_weight,
         "used_roi": 1.0 if used_roi else 0.0,
     }
 
@@ -810,6 +824,7 @@ class CVPipeline:
                 "[Quality Debug] "
                 f"quality={quality:.3f} frame_score={qdebug['frame_score']:.3f} "
                 f"roi_score={qdebug['roi_score']:.3f} roi_area={qdebug['roi_area_ratio']:.3f} "
+                f"roi_weight={qdebug['roi_weight']:.2f} "
                 f"frame_var={qdebug['frame_var']:.1f} roi_var={qdebug['roi_var']:.1f} "
                 f"used_roi={bool(qdebug['used_roi'])}"
             )

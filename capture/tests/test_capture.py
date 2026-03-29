@@ -19,6 +19,8 @@ from capture.capture import (
     JPEG_QUALITY,
     RESOLUTION,
     SERVER_URL,
+    _focus_score,
+    _select_best_frame_in_burst,
     CaptureConfig,
     flush_queue,
     frame_to_jpeg,
@@ -42,6 +44,8 @@ def _clear_capture_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "CAPTURE_MAX_ATTEMPTS",
         "CAPTURE_POST_TIMEOUT_SEC",
         "CAPTURE_WARMUP_SECONDS",
+        "CAPTURE_BURST_COUNT",
+        "CAPTURE_BURST_SPAN_MS",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -57,6 +61,8 @@ def test_config_defaults_match_workstream_phase4(monkeypatch: pytest.MonkeyPatch
     assert cfg.session_id == "default"
     assert cfg.in_concern_window is False
     assert cfg.warmup_seconds == 1.5
+    assert cfg.burst_count == 3
+    assert cfg.burst_span_ms == 180
 
 
 def test_config_reads_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,6 +74,8 @@ def test_config_reads_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CAPTURE_SESSION_ID", "room-a")
     monkeypatch.setenv("CAPTURE_IN_CONCERN_WINDOW", "1")
     monkeypatch.setenv("CAPTURE_WARMUP_SECONDS", "2.25")
+    monkeypatch.setenv("CAPTURE_BURST_COUNT", "4")
+    monkeypatch.setenv("CAPTURE_BURST_SPAN_MS", "250")
     cfg = CaptureConfig.from_env()
     assert cfg.width == 640 and cfg.height == 480
     assert cfg.capture_interval_sec == 2.5
@@ -75,6 +83,8 @@ def test_config_reads_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cfg.session_id == "room-a"
     assert cfg.in_concern_window is True
     assert cfg.warmup_seconds == 2.25
+    assert cfg.burst_count == 4
+    assert cfg.burst_span_ms == 250
 
 
 def test_import_dependencies_for_capture_client() -> None:
@@ -100,6 +110,32 @@ def test_frame_to_jpeg_and_resize() -> None:
 
 def test_frame_to_jpeg_rejects_empty() -> None:
     assert frame_to_jpeg(np.array([]), 85) is None
+
+
+def test_focus_score_prefers_sharp_frame() -> None:
+    blurry = np.full((64, 64, 3), 127, dtype=np.uint8)
+    sharp = blurry.copy()
+    sharp[:, ::2] = 255
+    assert _focus_score(sharp) > _focus_score(blurry)
+
+
+def test_select_best_frame_in_burst_picks_sharpest() -> None:
+    first = np.full((32, 32, 3), 120, dtype=np.uint8)
+    second = first.copy()
+    third = first.copy()
+    third[:, ::2] = 255
+
+    mock_cap = MagicMock()
+    mock_cap.read.side_effect = [(True, second), (True, third)]
+
+    best = _select_best_frame_in_burst(
+        mock_cap,
+        first,
+        burst_count=3,
+        burst_span_ms=0,
+    )
+
+    assert np.array_equal(best, third)
 
 
 @pytest.mark.parametrize(
