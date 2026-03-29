@@ -127,7 +127,7 @@ def test_live_events_empty_buffer() -> None:
         assert body["events"] == []
 
 
-def test_live_events_sit_to_walk_after_frames() -> None:
+def test_live_events_eating_edge_in_buffer() -> None:
     base_kw = dict(
         observed_at=datetime.now(timezone.utc),
         person_detected=True,
@@ -146,25 +146,22 @@ def test_live_events_sit_to_walk_after_frames() -> None:
         primary_identity_confidence=0.9,
     )
     o1 = Observation(id=str(uuid.uuid4()), pose=PoseType.SITTING, **base_kw)
-    o2 = Observation(id=str(uuid.uuid4()), pose=PoseType.WALKING, **base_kw)
-    o3 = Observation(
+    o2 = Observation(
         id=str(uuid.uuid4()),
-        pose=PoseType.WALKING,
-        **{**base_kw, "objects_detected": ["chair"]},
+        pose=PoseType.SITTING,
+        **{**base_kw, "activity": ActivityType.EATING, "objects_detected": ["fork"]},
     )
     app = create_app(
-        pipeline_factory=lambda: SeqPipeline([o1, o2, o3]),
+        pipeline_factory=lambda: SeqPipeline([o1, o2]),
         snowflake=_NoSnowflake(),
     )
     with TestClient(app) as client:
         files = {"file": ("f.jpg", _jpeg_bytes(), "image/jpeg")}
         assert client.post("/process-frame?session_id=s1", files=files).status_code == 200
         assert client.post("/process-frame?session_id=s1", files=files).status_code == 200
-        assert client.post("/process-frame?session_id=s1", files=files).status_code == 200
         r = client.get("/api/live-events?limit=10")
-        body = r.json()
-        keys = {e["dedupe_key"] for e in body["events"]}
-        assert "locomotion_sit_to_walk" in keys
+        keys = {e["dedupe_key"] for e in r.json()["events"]}
+        assert "activity_eating" in keys
 
 
 def test_primary_state_after_frame() -> None:

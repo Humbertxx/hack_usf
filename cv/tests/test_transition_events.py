@@ -7,8 +7,6 @@ from cv.models import ActivityType, MotionLevel, Observation, PoseType
 from cv.transition_events import (
     DEDUPE_DRINKING,
     DEDUPE_EATING,
-    DEDUPE_SIT_TO_WALK,
-    DEDUPE_WALK_TO_SIT,
     collect_transition_events,
 )
 
@@ -45,30 +43,14 @@ def _obs(
     return prev, curr
 
 
-def test_sit_to_walk() -> None:
+def test_sit_to_walk_no_longer_emitted() -> None:
     prev, curr = _obs(prev_pose=PoseType.SITTING, pose=PoseType.WALKING)
-    ev = collect_transition_events(prev, curr)
-    assert len(ev) == 1
-    assert ev[0]["dedupe_key"] == DEDUPE_SIT_TO_WALK
+    assert collect_transition_events(prev, curr) == []
 
 
-def test_walk_to_sit() -> None:
+def test_walk_to_sit_no_longer_emitted() -> None:
     prev, curr = _obs(prev_pose=PoseType.WALKING, pose=PoseType.SITTING)
-    ev = collect_transition_events(prev, curr)
-    assert len(ev) == 1
-    assert ev[0]["dedupe_key"] == DEDUPE_WALK_TO_SIT
-
-
-def test_sitting_to_standing_no_event() -> None:
-    prev, curr = _obs(prev_pose=PoseType.SITTING, pose=PoseType.STANDING)
-    ev = collect_transition_events(prev, curr)
-    assert ev == []
-
-
-def test_standing_to_walking_no_event() -> None:
-    prev, curr = _obs(prev_pose=PoseType.STANDING, pose=PoseType.WALKING)
-    ev = collect_transition_events(prev, curr)
-    assert ev == []
+    assert collect_transition_events(prev, curr) == []
 
 
 def test_eating_edge_only() -> None:

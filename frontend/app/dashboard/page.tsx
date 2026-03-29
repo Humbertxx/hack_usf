@@ -360,9 +360,8 @@ function DashboardInner() {
         ) : liveEvents.length === 0 && !eventsError ? (
           <Card hover={false} className="text-center">
             <p className="text-sm leading-relaxed text-neutral-600">
-              No transitions yet. When posture or activity changes (walking,
-              sitting, eating, drinking) or a fall is detected, items appear
-              here from the CV service.
+              No transitions yet. Eating, drinking water, and fall events from the
+              CV service will appear here.
             </p>
           </Card>
         ) : (
