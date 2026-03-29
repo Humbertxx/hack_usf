@@ -152,7 +152,7 @@ function DashboardInner() {
         sessionStorage.removeItem(FULL_STACK_SCHEDULED_KEY);
         router.replace("/dashboard");
       });
-    }, 6000);
+    }, 3000);
 
     return () => {
       window.clearTimeout(timer);
@@ -274,8 +274,8 @@ function DashboardInner() {
   const demoMode = isHackUsfDemoSession();
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-8 px-6 py-10">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="mx-auto w-full max-w-5xl space-y-8 px-4 py-8 sm:px-6 sm:py-10">
+      <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-start sm:justify-between">
         <SectionHeader
           eyebrow="Today"
           title="Hello!"
@@ -294,16 +294,14 @@ function DashboardInner() {
       </div>
 
       <section aria-labelledby="metrics-heading" className="space-y-4">
-        <h2 id="metrics-heading" className="text-section-label">
-          At a glance
-        </h2>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <SectionHeader id="metrics-heading" title="At a glance" />
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           {values.map((item) => (
             <Card
               key={item.type}
               className="flex min-h-[100px] flex-col items-center justify-center text-center"
             >
-              <p className="text-section-label text-[0.65rem] leading-tight">
+              <p className="text-overline-tight">
                 {item.type}
               </p>
               <p className="mt-2 text-xl font-semibold tabular-nums text-neutral-900">
@@ -337,7 +335,7 @@ function DashboardInner() {
             }`}
           >
             <div>
-              <p className="text-section-label text-[0.65rem] uppercase tracking-wide text-neutral-500">
+              <p className="text-overline-tight">
                 Primary person
               </p>
               <p className="mt-1 text-2xl font-semibold tracking-tight text-neutral-900">
@@ -387,7 +385,12 @@ function DashboardInner() {
         ) : null}
 
         {eventsLoading ? (
-          <div className="flex flex-col gap-3">
+          <div
+            className="flex flex-col gap-4"
+            role="status"
+            aria-live="polite"
+            aria-label="Loading live updates"
+          >
             {[0, 1, 2].map((i) => (
               <div
                 key={i}
@@ -397,7 +400,7 @@ function DashboardInner() {
           </div>
         ) : liveEvents.length === 0 && !eventsError ? (
           <Card hover={false} className="text-center">
-            <p className="text-sm leading-relaxed text-neutral-600">
+            <p className="mx-auto max-w-md text-sm leading-relaxed text-neutral-600">
               No transitions yet. Eating, drinking water, and fall events from the
               CV service will appear here.
             </p>
@@ -446,7 +449,7 @@ export default function DashboardPage() {
   return (
     <Suspense
       fallback={
-        <div className="text-body-reading flex min-h-[40vh] items-center justify-center px-6 text-neutral-600">
+        <div className="text-body-reading flex min-h-[40vh] items-center justify-center px-4 text-neutral-600 sm:px-6">
           Loading dashboard…
         </div>
       }

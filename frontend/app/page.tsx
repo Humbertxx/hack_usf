@@ -309,10 +309,12 @@ export default function Home() {
   }, [isCameraActive, oldPeople, duoStep]);
   const stepMeta = PHOTO_STEPS[enrollPhotoStep - 1];
   const guideVariant = stepMeta.key;
+  const enrollActionClass =
+    "w-full max-w-sm rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface)] p-5 text-neutral-900 shadow-sm ring-1 ring-[var(--ring-subtle)] transition hover:shadow-md disabled:opacity-50 disabled:hover:shadow-sm";
 
   return (
     <>
-      <div className="flex flex-col items-center justify-center w-screen mt-10 gap-5">
+      <div className="mt-10 flex w-full flex-col items-center justify-center gap-5 px-4 sm:px-6">
         <div className="text-center max-w-xl px-3">
           <p className="font-bold text-lg md:text-xl lg:text-3xl">
             {isCameraActive
@@ -342,14 +344,14 @@ export default function Home() {
             )}
         </div>
 
-        <div className="relative w-[400px] h-[400px]">
+        <div className="relative aspect-square w-full max-w-[400px]">
           {isCameraActive ? (
             <video
               ref={videoRef}
               autoPlay
               playsInline
               muted
-              className="w-full h-full object-cover rounded-2xl shadow border-4 border-sky-200"
+              className="h-full w-full rounded-2xl border border-[var(--border-subtle)] object-cover shadow-sm ring-1 ring-[var(--ring-subtle)]"
             />
           ) : (
             <Image
@@ -358,7 +360,7 @@ export default function Home() {
               width={400}
               height={400}
               priority
-              className="w-full h-full object-cover rounded-2xl shadow"
+              className="h-full w-full rounded-2xl border border-[var(--border-subtle)] object-cover shadow-sm ring-1 ring-[var(--ring-subtle)]"
             />
           )}
           {isCameraActive && captureCountdown !== null && (
@@ -381,23 +383,23 @@ export default function Home() {
           </p>
         ) : (
           <div
-            className={`shadow flex justify-center items-center bg-sky-50 rounded-2xl w-[300px] h-[50px] ${toggleLocked ? "opacity-50 pointer-events-none" : ""}`}
+            className={`flex h-12 w-full max-w-[320px] items-center justify-center rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface)] shadow-sm ring-1 ring-[var(--ring-subtle)] ${toggleLocked ? "pointer-events-none opacity-50" : ""}`}
           >
             <button
               type="button"
               onClick={() => grandma()}
               disabled={toggleLocked}
-              className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-l-2xl hover:scale-105 transition duration-100 ease-in disabled:hover:scale-100 ${oldPeople === 1 || oldPeople === 3 ? "bg-sky-200" : ""}`}
+              className={`h-full w-1/2 rounded-l-2xl bg-[var(--surface)] text-sm font-medium transition hover:bg-[var(--surface-muted)] ${oldPeople === 1 || oldPeople === 3 ? "bg-[var(--surface-muted)] text-neutral-900" : "text-neutral-700"}`}
             >
-              grandma
+              Grandma
             </button>
             <button
               type="button"
               onClick={() => grandpa()}
               disabled={toggleLocked}
-              className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-r-2xl hover:scale-105 transition duration-100 ease-in disabled:hover:scale-100 ${oldPeople === 2 || oldPeople === 3 ? "bg-sky-200" : ""}`}
+              className={`h-full w-1/2 rounded-r-2xl bg-[var(--surface)] text-sm font-medium transition hover:bg-[var(--surface-muted)] ${oldPeople === 2 || oldPeople === 3 ? "bg-[var(--surface-muted)] text-neutral-900" : "text-neutral-700"}`}
             >
-              grandpa
+              Grandpa
             </button>
           </div>
         )}
@@ -410,7 +412,7 @@ export default function Home() {
 
         <div className="flex flex-col items-center justify-center gap-5">
           {oldPeople === 0 && (
-            <div className="bg-sky-50 p-5 rounded-lg shadow">
+            <div className="w-full max-w-sm rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface)] p-5 text-center shadow-sm ring-1 ring-[var(--ring-subtle)]">
               <p className="font-bold text-lg">No One Selected!</p>
             </div>
           )}
@@ -423,7 +425,7 @@ export default function Home() {
                   ? void captureAfterCountdown("grandma")
                   : startCameraWithReset()
               }
-              className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
+              className={enrollActionClass}
             >
               <p className="font-bold text-lg">
                 {isCameraActive
@@ -433,7 +435,7 @@ export default function Home() {
                   : "Start Grandma Enrollment"}
               </p>
               {isCameraActive && (
-                <p className="text-sm text-sky-800 mt-1 text-center">
+                <p className="mt-1 text-center text-sm text-neutral-600">
                   3 quick photos for better recognition
                 </p>
               )}
@@ -449,7 +451,7 @@ export default function Home() {
                   ? void captureAfterCountdown("grandpa")
                   : startCameraWithReset()
               }
-              className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
+              className={enrollActionClass}
             >
               <p className="font-bold text-lg">
                 {isCameraActive
@@ -459,7 +461,7 @@ export default function Home() {
                   : "Start Grandpa Enrollment"}
               </p>
               {isCameraActive && (
-                <p className="text-sm text-sky-800 mt-1 text-center">
+                <p className="mt-1 text-center text-sm text-neutral-600">
                   3 quick photos for better recognition
                 </p>
               )}
@@ -470,10 +472,10 @@ export default function Home() {
             <button
               type="button"
               onClick={startDuo}
-              className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300"
+              className={enrollActionClass}
             >
               <p className="font-bold text-lg">Start Duo Enrollment</p>
-              <p className="text-sm text-sky-800 mt-1 text-center">
+              <p className="mt-1 text-center text-sm text-neutral-600">
                 3 photos each person
               </p>
             </button>
@@ -484,7 +486,7 @@ export default function Home() {
               type="button"
               disabled={isCaptureBusy}
               onClick={() => void captureAfterCountdown("grandma")}
-              className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
+              className={enrollActionClass}
             >
               <p className="font-bold text-lg">
                 {enrollPhotoStep < 3
@@ -499,7 +501,7 @@ export default function Home() {
               type="button"
               disabled={isCaptureBusy}
               onClick={() => void captureAfterCountdown("grandpa")}
-              className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
+              className={enrollActionClass}
             >
               <p className="font-bold text-lg">
                 {enrollPhotoStep < 3
@@ -513,7 +515,7 @@ export default function Home() {
             <button
               type="button"
               onClick={cancelCamera}
-              className="text-gray-500 underline text-sm"
+              className="rounded-sm text-sm text-neutral-600 underline underline-offset-4 transition hover:text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40"
             >
               Cancel
             </button>

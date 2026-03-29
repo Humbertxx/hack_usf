@@ -60,6 +60,15 @@ body {
   color: var(--text-muted);
 }
 
+.text-overline-tight {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
 .text-body-reading {
   font-size: 1rem;
   line-height: 1.5rem;
