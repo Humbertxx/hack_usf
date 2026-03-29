@@ -50,7 +50,13 @@ def test_noise_filter_allows_no_person_in_concern_window() -> None:
         frame_quality=0.9,
     )
     # confidence gate still applies unless we lower threshold
-    assert should_send(obs, None, in_concern_window=True, min_confidence=0.0) is True
+    assert should_send(
+        obs,
+        None,
+        in_concern_window=True,
+        min_pose_confidence=0.0,
+        min_activity_confidence=0.0,
+    ) is True
 
 
 def test_noise_filter_skips_low_confidence() -> None:

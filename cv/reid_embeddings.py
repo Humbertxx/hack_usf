@@ -2,11 +2,24 @@
 ReID Embedding Extraction using torchreid OSNet.
 
 Provides person re-identification embeddings for identity matching.
-Uses OSNet (osnet_x0_25) - a lightweight model (~2MB) optimized for ReID tasks.
+Default: osnet_ain_x1_0 (attention-based, strongest OSNet variant).
+Override with CV_REID_MODEL env var.
+
+Available models (increasing accuracy & VRAM):
+  osnet_x0_25     - Lightweight, ~0.2M params
+  osnet_x0_5      - ~0.6M params  
+  osnet_x0_75     - ~1.1M params
+  osnet_x1_0      - Standard, ~2.2M params
+  osnet_ain_x0_5  - Attention-based, ~0.6M params
+  osnet_ain_x0_75 - Attention-based, ~1.1M params
+  osnet_ain_x1_0  - Attention-based, ~2.2M params (best accuracy)
+
+Changing ReID architecture invalidates existing enrollments — re-enroll subjects.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -25,27 +38,28 @@ def _device() -> str:
 class ReIDEmbedder:
     """
     Person re-identification embedding extractor using torchreid OSNet.
-    
-    Extracts 512-dimensional normalized embeddings from person crops
-    for identity matching via cosine similarity.
+
+    Extracts normalized embeddings from person crops for cosine-similarity matching.
     """
 
     def __init__(
         self,
-        model_name: str = "osnet_x0_25",
+        model_name: Optional[str] = None,
         device: str = "auto",
     ) -> None:
         """
         Initialize the ReID embedder.
         
         Args:
-            model_name: torchreid model name. Default "osnet_x0_25" is small and fast.
+            model_name: torchreid model name. If None, uses CV_REID_MODEL or "osnet_x1_0".
             device: "auto", "cuda:0", "cpu". Auto selects CUDA if available.
         """
-        self._model_name = model_name
+        self._model_name = model_name or os.environ.get("CV_REID_MODEL", "osnet_ain_x1_0")
         self._device_str = device if device != "auto" else _device()
         self._model: Optional[nn.Module] = None
-        self._input_size = (256, 128)  # Standard ReID input: height x width
+        # ReID input size (height x width). Larger = better features, more VRAM
+        # Standard: (256, 128), High-res: (384, 192)
+        self._input_size = (384, 192)
 
     def _ensure_model(self) -> nn.Module:
         """Lazy load the model on first use."""

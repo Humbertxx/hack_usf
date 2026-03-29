@@ -64,6 +64,10 @@ class Observation(BaseModel):
     minutes_since_last_seen: int
     frame_quality: float
     session_id: str
+    # Primary enrolled person (Grandma/Grandpa) - extracted from detections
+    primary_person_id: Optional[str] = None
+    primary_display_name: Optional[str] = None
+    primary_identity_confidence: Optional[float] = None
 
 
 class Alert(BaseModel):

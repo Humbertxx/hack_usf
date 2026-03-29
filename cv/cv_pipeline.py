@@ -23,8 +23,20 @@ _POSE_LITE_URL = (
     "pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
 )
 
-# BlazePose indices (identical across legacy PoseLandmarker and Tasks lists).
-_L_SHOULDER, _R_SHOULDER, _L_HIP, _R_HIP = 11, 12, 23, 24
+# BlazePose landmark indices (identical across legacy PoseLandmarker and Tasks lists).
+# Face landmarks
+_NOSE = 0
+_L_EYE_INNER, _L_EYE, _L_EYE_OUTER = 1, 2, 3
+_R_EYE_INNER, _R_EYE, _R_EYE_OUTER = 4, 5, 6
+_L_EAR, _R_EAR = 7, 8
+_MOUTH_L, _MOUTH_R = 9, 10
+# Upper body
+_L_SHOULDER, _R_SHOULDER = 11, 12
+_L_ELBOW, _R_ELBOW = 13, 14
+_L_WRIST, _R_WRIST = 15, 16
+# Lower body  
+_L_HIP, _R_HIP = 23, 24
+_L_KNEE, _R_KNEE = 25, 26
 
 
 def _device() -> str:
@@ -41,36 +53,83 @@ def _infer_pose_type_from_landmarks(
     landmarks: Optional[List[Any]],
     motion_level: MotionLevel,
 ) -> Tuple[PoseType, float]:
+    """
+    Infer pose type from MediaPipe landmarks with fallback for partial visibility.
+    
+    Full body mode: Uses shoulders + hips (most accurate)
+    Upper body mode: Uses nose + shoulders when hips aren't visible (e.g., sitting at table)
+    """
     if not landmarks or len(landmarks) <= max(_L_HIP, _R_HIP):
         return PoseType.UNKNOWN, 0.0
 
-    ls, rs, lh, rh = (
-        landmarks[_L_SHOULDER],
-        landmarks[_R_SHOULDER],
-        landmarks[_L_HIP],
-        landmarks[_R_HIP],
-    )
-    ls_v = min(
-        _visibility(ls),
-        _visibility(rs),
-        _visibility(lh),
-        _visibility(rh),
-    )
-    if ls_v < 0.35:
-        return PoseType.UNKNOWN, float(ls_v)
+    ls = landmarks[_L_SHOULDER]
+    rs = landmarks[_R_SHOULDER]
+    lh = landmarks[_L_HIP]
+    rh = landmarks[_R_HIP]
+    nose = landmarks[_NOSE]
+    
+    shoulder_vis = min(_visibility(ls), _visibility(rs))
+    hip_vis = min(_visibility(lh), _visibility(rh))
+    nose_vis = _visibility(nose)
+    
+    # Try full body pose detection first (most accurate)
+    full_body_vis = min(shoulder_vis, hip_vis)
+    if full_body_vis >= 0.35:
+        shoulder_y = (ls.y + rs.y) / 2.0
+        hip_y = (lh.y + rh.y) / 2.0
+        dy = shoulder_y - hip_y
 
-    shoulder_y = (ls.y + rs.y) / 2.0
-    hip_y = (lh.y + rh.y) / 2.0
-    dy = shoulder_y - hip_y
+        if abs(dy) < 0.07:
+            pose = PoseType.LYING
+        elif dy < -0.06:
+            pose = PoseType.WALKING if motion_level in (MotionLevel.HIGH, MotionLevel.NORMAL) else PoseType.STANDING
+        else:
+            pose = PoseType.SITTING
 
-    if abs(dy) < 0.07:
-        pose = PoseType.LYING
-    elif dy < -0.06:
-        pose = PoseType.WALKING if motion_level in (MotionLevel.HIGH, MotionLevel.NORMAL) else PoseType.STANDING
-    else:
-        pose = PoseType.SITTING
-
-    return pose, float(min(1.0, max(0.5, ls_v)))
+        return pose, float(min(1.0, max(0.5, full_body_vis)))
+    
+    # Fallback: upper body only (shoulders + nose/face visible, hips occluded)
+    # Common when sitting at a table across from camera
+    upper_body_vis = min(shoulder_vis, nose_vis)
+    if upper_body_vis >= 0.35:
+        shoulder_y = (ls.y + rs.y) / 2.0
+        nose_y = nose.y
+        
+        # Vertical distance from nose to shoulders
+        # Lying: nose and shoulders at similar height
+        # Sitting/Standing: nose clearly above shoulders
+        nose_shoulder_dy = shoulder_y - nose_y
+        
+        if abs(nose_shoulder_dy) < 0.05:
+            # Nose at same level as shoulders = lying down
+            pose = PoseType.LYING
+        elif nose_shoulder_dy > 0.08:
+            # Nose well above shoulders = upright (sitting or standing)
+            # Without hips, assume SITTING (safer for elderly monitoring)
+            # High motion suggests standing/walking
+            if motion_level == MotionLevel.HIGH:
+                pose = PoseType.WALKING
+            else:
+                pose = PoseType.SITTING
+        else:
+            # Nose slightly above shoulders - likely sitting
+            pose = PoseType.SITTING
+        
+        # Lower confidence since we're using fallback method
+        return pose, float(min(0.7, max(0.4, upper_body_vis)))
+    
+    # Even more fallback: just shoulders visible (face turned away)
+    if shoulder_vis >= 0.4:
+        # Can't determine much without face or hips
+        # Use motion to guess
+        if motion_level == MotionLevel.HIGH:
+            return PoseType.WALKING, 0.4
+        elif motion_level == MotionLevel.NONE:
+            return PoseType.SITTING, 0.4
+        else:
+            return PoseType.STANDING, 0.35
+    
+    return PoseType.UNKNOWN, 0.0
 
 
 def _visibility(lm: Any) -> float:
@@ -81,29 +140,48 @@ def _visibility(lm: Any) -> float:
 
 
 def _infer_activity(pose: PoseType, labels: Set[str]) -> Tuple[ActivityType, float]:
+    """
+    Infer activity from pose and detected objects.
+    
+    When pose is UNKNOWN but we have contextual objects, we can still infer activity.
+    """
     labels_l = {x.lower() for x in labels}
+    
+    # Contextual object sets
+    kitchen_objects = {"oven", "microwave", "refrigerator", "sink"}
+    media_objects = {"tv", "laptop", "remote"}
+    dining_objects = {"bowl", "banana", "apple", "bottle", "cup", "fork", "knife", "spoon", "sandwich", "pizza"}
+    furniture_objects = {"chair", "couch", "sofa", "dining table"}
 
     if pose == PoseType.LYING and {"bed", "couch", "sofa"} & labels_l:
         return ActivityType.SLEEPING, 0.65
     if pose == PoseType.LYING:
         return ActivityType.IDLE, 0.55
-    if {"oven", "microwave", "refrigerator", "sink"} & labels_l and pose in (
+    if kitchen_objects & labels_l and pose in (
         PoseType.STANDING,
         PoseType.WALKING,
         PoseType.SITTING,
+        PoseType.UNKNOWN,  # Allow UNKNOWN pose in kitchen context
     ):
-        return ActivityType.COOKING, 0.7
-    if {"tv", "laptop", "remote"} & labels_l and pose in (PoseType.SITTING, PoseType.LYING):
-        return ActivityType.WATCHING_TV, 0.65
-    if (
-        {"bowl", "banana", "apple", "bottle", "cup", "fork", "knife", "spoon", "sandwich", "pizza"} & labels_l
-    ) and pose in (
+        return ActivityType.COOKING, 0.7 if pose != PoseType.UNKNOWN else 0.55
+    if media_objects & labels_l and pose in (PoseType.SITTING, PoseType.LYING, PoseType.UNKNOWN):
+        return ActivityType.WATCHING_TV, 0.65 if pose != PoseType.UNKNOWN else 0.5
+    if dining_objects & labels_l and pose in (
         PoseType.SITTING,
         PoseType.STANDING,
+        PoseType.UNKNOWN,  # Eating at table with partial visibility
     ):
-        return ActivityType.EATING, 0.65
+        return ActivityType.EATING, 0.65 if pose != PoseType.UNKNOWN else 0.5
+    
+    # For UNKNOWN pose, try to infer from furniture context
     if pose == PoseType.UNKNOWN:
+        if {"chair", "dining table"} & labels_l:
+            # Sitting at table (common scenario: camera across table)
+            return ActivityType.IDLE, 0.5
+        if {"couch", "sofa"} & labels_l:
+            return ActivityType.IDLE, 0.5
         return ActivityType.UNKNOWN, 0.4
+        
     return ActivityType.IDLE, 0.55
 
 
@@ -262,19 +340,115 @@ def _extract_landmarks_rgb(
     return None, None, MotionLevel.NORMAL
 
 
+def _yolo_model_name() -> str:
+    # YOLOv8 model variants (increasing accuracy & VRAM):
+    #   yolov8n.pt (nano)   - ~3M params, fastest
+    #   yolov8s.pt (small)  - ~11M params
+    #   yolov8m.pt (medium) - ~26M params
+    #   yolov8l.pt (large)  - ~44M params
+    #   yolov8x.pt (xlarge) - ~68M params, highest accuracy
+    return os.environ.get("CV_YOLO_MODEL", "yolov8x.pt")
+
+
+def _yolo_imgsz() -> int:
+    # Higher imgsz = more detail, better small object detection
+    # 5090 can easily handle 1280 or higher
+    raw = os.environ.get("CV_YOLO_IMGSZ", "1280")
+    try:
+        v = int(raw)
+        return max(320, min(1920, v))
+    except ValueError:
+        return 1280
+
+
+def _normalize_yolo_label(label: str) -> str:
+    """Lowercase and collapse whitespace for comparison with COCO-style names."""
+    return " ".join(label.strip().lower().split())
+
+
+# Default COCO-80 allowlist after removing:
+# - All vehicles (bicycle, car, motorcycle, airplane, bus, train, truck, boat)
+# - Travel / mobility gear (skis, snowboard, skateboard, surfboard, suitcase)
+# - Outdoor-only street & play (traffic light, fire hydrant, stop sign, parking meter, bench, kite, frisbee)
+# - Animals except cat and dog
+# - Extra indoor-clutter / non-priority: backpack, baseball bat/glove, bed, clock, donut, hair drier,
+#   handbag, hot dog, keyboard, laptop, mouse, oven, sports ball, teddy bear, tennis racket,
+#   tie, toilet, toothbrush, umbrella, vase
+#   (microwave kept for cooking activity cues)
+# Person is always kept in the detection loop (also in this set for activity labels).
+_YOLO_DEFAULT_ALLOWED_LABELS: frozenset[str] = frozenset(
+    {
+        "apple",
+        "banana",
+        "book",
+        "bottle",
+        "bowl",
+        "broccoli",
+        "cake",
+        "carrot",
+        "cat",
+        "cell phone",
+        "chair",
+        "couch",
+        "cup",
+        "dining table",
+        "dog",
+        "fork",
+        "knife",
+        "microwave",
+        "orange",
+        "person",
+        "pizza",
+        "potted plant",
+        "refrigerator",
+        "remote",
+        "sandwich",
+        "scissors",
+        "sink",
+        "spoon",
+        "toaster",
+        "tv",
+        "wine glass",
+    }
+)
+
+
+def _yolo_allowed_labels() -> frozenset[str]:
+    """
+    Comma-separated override via CV_YOLO_ALLOWED_LABELS (normalized like COCO names).
+    If unset, uses _YOLO_DEFAULT_ALLOWED_LABELS.
+    """
+    raw = os.environ.get("CV_YOLO_ALLOWED_LABELS", "").strip()
+    if not raw:
+        return _YOLO_DEFAULT_ALLOWED_LABELS
+    parts = [_normalize_yolo_label(p) for p in raw.split(",") if p.strip()]
+    return frozenset(parts)
+
+
+def _yolo_label_kept(label: str, cls_id: int, allowed: frozenset[str]) -> bool:
+    """Standard COCO: class 0 is person; always keep person for ReID."""
+    key = _normalize_yolo_label(label)
+    if cls_id == 0 or key == "person":
+        return True
+    return key in allowed
+
+
 class CVPipeline:
     VISITOR_BUFFER_SIZE = 50
     VISITOR_TTL_SECONDS = 300  # 5 minutes
 
     def __init__(
         self,
-        yolo_model_name: str = "yolov8n.pt",
+        yolo_model_name: Optional[str] = None,
         *,
         pose_backend: Optional[str] = None,
         identity_store: Optional[Any] = None,
     ) -> None:
         self._device = _device()
-        self.yolo_model = YOLO(yolo_model_name)
+        name = yolo_model_name if yolo_model_name is not None else _yolo_model_name()
+        self.yolo_model = YOLO(name)
+        self._yolo_imgsz = _yolo_imgsz()
+        self._yolo_allowed_labels = _yolo_allowed_labels()
         pref = pose_backend if pose_backend is not None else os.environ.get("CV_POSE_BACKEND", "auto")
         self._pose = _build_pose_handles(pref)
         self._prev_kp: Optional[np.ndarray] = None
@@ -286,10 +460,19 @@ class CVPipeline:
 
         if identity_store is not None:
             from cv.reid_embeddings import ReIDEmbedder
+
             self._reid_embedder = ReIDEmbedder()
-            print(f"[CVPipeline] ReID enabled. Identity store has {identity_store.count} enrolled subjects.")
+            print(
+                f"[CVPipeline] YOLO={name} imgsz={self._yolo_imgsz} | "
+                f"ReID={self._reid_embedder.model_name} | "
+                f"subjects={identity_store.count} | "
+                f"yolo_allowed={len(self._yolo_allowed_labels)}"
+            )
         else:
-            print("[CVPipeline] WARNING: No identity store provided - ReID matching disabled!")
+            print(
+                f"[CVPipeline] YOLO={name} imgsz={self._yolo_imgsz} | "
+                f"ReID disabled | yolo_allowed={len(self._yolo_allowed_labels)}"
+            )
 
     def close(self) -> None:
         if self._pose.backend == "legacy" and self._pose.legacy is not None:
@@ -460,7 +643,7 @@ class CVPipeline:
         results = self.yolo_model.predict(
             source=frame,
             device=self._device,
-            imgsz=640,
+            imgsz=self._yolo_imgsz,
             verbose=False,
         )
         raw_labels: List[str] = []
@@ -476,8 +659,11 @@ class CVPipeline:
                     if conf < 0.35:
                         continue
                     name = str(names.get(int(cls), str(int(cls))))
+                    cls_i = int(cls)
+                    if not _yolo_label_kept(name, cls_i, self._yolo_allowed_labels):
+                        continue
                     raw_labels.append(name)
-                    is_person = int(cls) == 0
+                    is_person = cls_i == 0
                     if is_person:
                         person_detected = True
                     if i < len(boxes_xyxy):
@@ -509,6 +695,23 @@ class CVPipeline:
 
         mins_unseen = 0 if person_detected else max(0, int(minutes_since_last_seen_if_absent))
 
+        # Extract primary enrolled person (highest confidence Grandma/Grandpa)
+        primary_person_id: Optional[str] = None
+        primary_display_name: Optional[str] = None
+        primary_identity_confidence: Optional[float] = None
+        
+        best_enrolled_conf = 0.0
+        for det in detections:
+            if det.label == "person" and det.is_enrolled and det.identity_confidence is not None:
+                if det.identity_confidence > best_enrolled_conf:
+                    best_enrolled_conf = det.identity_confidence
+                    primary_person_id = det.person_id
+                    primary_display_name = det.display_name
+                    primary_identity_confidence = det.identity_confidence
+        
+        if primary_person_id:
+            print(f"[CVPipeline] Primary person: {primary_display_name} (conf={primary_identity_confidence:.3f})")
+
         return Observation(
             id=oid,
             observed_at=observed_at,
@@ -525,4 +728,7 @@ class CVPipeline:
             minutes_since_last_seen=mins_unseen,
             frame_quality=quality,
             session_id=session_id,
+            primary_person_id=primary_person_id,
+            primary_display_name=primary_display_name,
+            primary_identity_confidence=primary_identity_confidence,
         )

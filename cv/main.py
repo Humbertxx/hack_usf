@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Callable, List, Optional
 
 import cv2
@@ -16,6 +17,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from pydantic import BaseModel
+from dotenv import load_dotenv
 
 from cv.alert_engine import AlertEngine
 from cv.cv_pipeline import CVPipeline
@@ -23,7 +25,47 @@ from cv.identity_store import IdentityStore
 from cv.models import Alert, Observation
 from cv.noise_filter import should_send
 from cv.reid_embeddings import ReIDEmbedder
+from cv.snowflake_client import create_snowflake_client
 from cv.websocket_manager import WebSocketManager
+
+# Must align with ReID match threshold in cv_pipeline._enrich_person_detection (0.65).
+# If this is higher than that threshold, frames can be "MATCHED" in logs but never sent to Snowflake.
+MIN_IDENTITY_CONFIDENCE = 0.65
+
+
+def should_send_to_snowflake(
+    obs: Observation,
+    prev_sent: Optional[Observation],
+    *,
+    in_concern_window: bool = False,
+) -> bool:
+    """
+    Determine if an observation should be sent to Snowflake.
+    
+    Requirements:
+    1. Must pass basic noise filter (confidence, quality thresholds)
+    2. If person detected, must be an enrolled person (Grandma/Grandpa)
+       with identity confidence >= MIN_IDENTITY_CONFIDENCE
+    
+    This ensures only high-quality, identified observations are stored.
+    """
+    if not should_send(obs, prev_sent, in_concern_window=in_concern_window):
+        return False
+    
+    # If person detected, require enrolled identity with high confidence
+    if obs.person_detected:
+        # Must have primary person identified (enrolled subject)
+        if not obs.primary_person_id:
+            print(f"[Snowflake Filter] Skipping: person detected but no enrolled identity")
+            return False
+        
+        # Must have high identity confidence
+        if obs.primary_identity_confidence is None or obs.primary_identity_confidence < MIN_IDENTITY_CONFIDENCE:
+            conf = obs.primary_identity_confidence or 0.0
+            print(f"[Snowflake Filter] Skipping: identity confidence too low ({conf:.2f} < {MIN_IDENTITY_CONFIDENCE})")
+            return False
+    
+    return True
 
 
 class MockSnowflakeClient:
@@ -32,7 +74,10 @@ class MockSnowflakeClient:
         self.alerts: list[Alert] = []
 
     def add_observation(self, obs: Observation) -> None:
-        print(f"[MOCK SNOWFLAKE] Observation: {obs.id} - {obs.pose}")
+        identity_info = ""
+        if obs.primary_person_id:
+            identity_info = f" | {obs.primary_display_name} (conf={obs.primary_identity_confidence:.2f})"
+        print(f"[MOCK SNOWFLAKE] Observation: {obs.id} - {obs.pose} - {obs.activity}{identity_info}")
         self.observations.append(obs)
 
     def add_alert(self, alert: Alert) -> None:
@@ -72,9 +117,12 @@ class SubjectListResponse(BaseModel):
 def create_app(
     *,
     pipeline_factory: Optional[Callable[[], CVPipeline]] = None,
-    snowflake: Optional[MockSnowflakeClient] = None,
+    snowflake: Optional[Any] = None,
     identity_store: Optional[IdentityStore] = None,
 ) -> FastAPI:
+    # Repo-root .env (Snowflake, etc.). Does not override existing os.environ.
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
     store = identity_store or IdentityStore()
     pipeline_factory = pipeline_factory or (lambda: CVPipeline(identity_store=store))
 
@@ -87,7 +135,7 @@ def create_app(
     app = FastAPI(lifespan=lifespan)
     app.state.alert_engine = AlertEngine()
     app.state.ws_manager = WebSocketManager()
-    app.state.snowflake = snowflake or MockSnowflakeClient()
+    app.state.snowflake = snowflake or create_snowflake_client()
     app.state.prev_sent: Observation | None = None
     app.state.identity_store = store
     app.state.reid_embedder: Optional[ReIDEmbedder] = None
@@ -111,11 +159,21 @@ def create_app(
         obs = app.state.pipeline.process_frame(frame, session_id=session_id)
         obs_json = obs.model_dump(mode="json")
 
-        if not should_send(
+        should_send_result = should_send_to_snowflake(
             obs,
             app.state.prev_sent,
             in_concern_window=in_concern_window,
-        ):
+        )
+        
+        if not should_send_result:
+            # Debug: show why it was filtered
+            if obs.primary_person_id:
+                print(f"[Snowflake Filter] Filtered despite identity: {obs.primary_display_name} (conf={obs.primary_identity_confidence:.3f})")
+                if app.state.prev_sent:
+                    same_pose = obs.pose == app.state.prev_sent.pose
+                    same_activity = obs.activity == app.state.prev_sent.activity
+                    same_objects = obs.objects_detected == app.state.prev_sent.objects_detected
+                    print(f"[Snowflake Filter] Duplicate check: pose={same_pose}, activity={same_activity}, objects={same_objects}")
             return ProcessFrameResponse(
                 ok=True,
                 filtered=True,

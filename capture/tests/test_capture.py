@@ -48,9 +48,9 @@ def _clear_capture_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_config_defaults_match_workstream_phase4(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_capture_env(monkeypatch)
     cfg = CaptureConfig.from_env()
-    assert (cfg.width, cfg.height) == RESOLUTION == (1280, 720)
+    assert (cfg.width, cfg.height) == RESOLUTION == (1920, 1080)
     assert cfg.capture_interval_sec == float(CAPTURE_INTERVAL) == 15.0
-    assert cfg.jpeg_quality == JPEG_QUALITY == 85
+    assert cfg.jpeg_quality == JPEG_QUALITY == 95
     assert cfg.server_url == SERVER_URL == "http://localhost:8080/process-frame"
     assert cfg.camera_index == 0
     assert cfg.session_id == "default"
