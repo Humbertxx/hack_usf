@@ -16,14 +16,19 @@ export default function Home() {
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [enroll, setenroll] = useState(false);
 
-  // webcame to start/stop webcame
   useEffect(() => {
     let stream: MediaStream | null = null;
+    let cancelled = false;
 
     if (isCameraActive) {
-      const startVideo = async () => {
+      (async () => {
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          const s = await getPreferredVideoStream();
+          if (cancelled) {
+            s.getTracks().forEach((t) => t.stop());
+            return;
+          }
+          stream = s;
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
           }
@@ -31,16 +36,27 @@ export default function Home() {
           console.error("Error accessing webcam:", err);
           setIsCameraActive(false);
         }
-      };
-      startVideo();
+      })();
     }
 
     return () => {
+      cancelled = true;
       if (stream) {
         stream.getTracks().forEach((track) => track.stop());
       }
     };
   }, [isCameraActive]);
+
+  const stopVideoTracks = useCallback(() => {
+    const v = videoRef.current;
+    const src = v?.srcObject;
+    if (src instanceof MediaStream) {
+      src.getTracks().forEach((t) => t.stop());
+    }
+    if (v) {
+      v.srcObject = null;
+    }
+  }, []);
 
   const captureAndEnroll = async (subjectId: "grandma" | "grandpa") => {
     const canvas = canvasRef.current;
@@ -88,6 +104,7 @@ export default function Home() {
   };
 
   const grandpa = () => {
+    if (duoStep !== "idle") return;
     if (oldPeople === 2) setOldPeople(0);
     else if (oldPeople === 1) setOldPeople(3);
     else if (oldPeople === 3) setOldPeople(1);
@@ -95,20 +112,43 @@ export default function Home() {
   };
 
   const grandma = () => {
+    if (duoStep !== "idle") return;
     if (oldPeople === 1) setOldPeople(0);
     else if (oldPeople === 2) setOldPeople(3);
     else if (oldPeople === 3) setOldPeople(2);
     else setOldPeople(1);
   };
 
+  const startDuo = () => {
+    setDuoStep("grandma");
+    setIsCameraActive(true);
+    setEnrollError(null);
+  };
+
+  const cancelCamera = () => {
+    stopVideoTracks();
+    setIsCameraActive(false);
+    setDuoStep("idle");
+    setEnrollError(null);
+  };
+
+  const toggleLocked = duoStep !== "idle";
+
   return (
     <>
       <div className="flex flex-col items-center justify-center w-screen mt-10 gap-5">
-        <p className="font-bold text-lg md:text-xl lg:text-3xl text-center">
-          {isCameraActive
-            ? "Align face in the frame"
-            : "Welcome to Enrollment! Choose family members to enroll below."}
-        </p>
+        <div className="text-center max-w-xl">
+          <p className="font-bold text-lg md:text-xl lg:text-3xl">
+            {isCameraActive
+              ? "Step back — fit full body in frame"
+              : "Welcome to Enrollment! Choose family members to enroll below."}
+          </p>
+          {isCameraActive && oldPeople === 3 && duoStep === "grandpa" && (
+            <p className="mt-2 text-base md:text-lg text-sky-800 font-medium">
+              Next: Grandpa
+            </p>
+          )}
+        </div>
 
         <div className="relative w-[400px] h-[400px]">
           {isCameraActive ? (
@@ -116,6 +156,7 @@ export default function Home() {
               ref={videoRef}
               autoPlay
               playsInline
+              muted
               className="w-full h-full object-cover rounded-2xl shadow border-4 border-sky-200"
             />
           ) : (
@@ -127,24 +168,35 @@ export default function Home() {
               className="w-full h-full object-cover rounded-2xl shadow"
             />
           )}
-          {/* canvas for capturing frames*/}
           <canvas ref={canvasRef} className="hidden" />
         </div>
 
-        <div className="shadow flex justify-center items-center bg-sky-50 rounded-2xl w-[300px] h-[50px]">
+        <div
+          className={`shadow flex justify-center items-center bg-sky-50 rounded-2xl w-[300px] h-[50px] ${toggleLocked ? "opacity-50 pointer-events-none" : ""}`}
+        >
           <button
+            type="button"
             onClick={() => grandma()}
-            className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-l-2xl hover:scale-105 transition duration-100 ease-in ${oldPeople === 1 || oldPeople === 3 ? "bg-sky-200" : ""}`}
+            disabled={toggleLocked}
+            className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-l-2xl hover:scale-105 transition duration-100 ease-in disabled:hover:scale-100 ${oldPeople === 1 || oldPeople === 3 ? "bg-sky-200" : ""}`}
           >
             grandma
           </button>
           <button
+            type="button"
             onClick={() => grandpa()}
-            className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-r-2xl hover:scale-105 transition duration-100 ease-in ${oldPeople === 2 || oldPeople === 3 ? "bg-sky-200" : ""}`}
+            disabled={toggleLocked}
+            className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-r-2xl hover:scale-105 transition duration-100 ease-in disabled:hover:scale-100 ${oldPeople === 2 || oldPeople === 3 ? "bg-sky-200" : ""}`}
           >
             grandpa
           </button>
         </div>
+
+        {enrollError && (
+          <p className="text-red-600 text-sm max-w-md text-center" role="alert">
+            {enrollError}
+          </p>
+        )}
 
         <div className="flex flex-col items-center justify-center gap-5">
           {oldPeople === 0 && (
@@ -173,12 +225,14 @@ export default function Home() {
 
           {oldPeople === 2 && (
             <button
+              type="button"
+              disabled={isEnrolling}
               onClick={() =>
                 isCameraActive
-                  ? captureAndEnroll("grandpa")
+                  ? void captureAndEnroll("grandpa")
                   : setIsCameraActive(true)
               }
-              className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300"
+              className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
             >
               <p className="font-bold text-lg">
                 {isCameraActive
@@ -227,7 +281,8 @@ export default function Home() {
 
           {isCameraActive && (
             <button
-              onClick={() => setIsCameraActive(false)}
+              type="button"
+              onClick={cancelCamera}
               className="text-gray-500 underline text-sm"
             >
               Cancel
