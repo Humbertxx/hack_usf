@@ -180,7 +180,7 @@ export default function Home() {
 
   return (
     <>
-      <div className="flex flex-col items-center justify-center w-screen mt-10 gap-5 px-2">
+      <div className="flex flex-col items-center justify-center w-screen mt-10 gap-5">
         <div className="text-center max-w-xl">
           <p className="font-bold text-lg md:text-xl lg:text-3xl">
             {isCameraActive
@@ -194,30 +194,29 @@ export default function Home() {
           )}
         </div>
 
-        <div className="relative w-[min(92vw,720px)] aspect-[3/4] bg-neutral-900 rounded-2xl shadow border-4 border-sky-200 overflow-hidden">
+        <div className="relative w-[400px] h-[400px]">
           {isCameraActive ? (
             <video
               ref={videoRef}
               autoPlay
               playsInline
               muted
-              className="absolute inset-0 w-full h-full object-contain"
+              className="w-full h-full object-cover rounded-2xl shadow border-4 border-sky-200"
             />
           ) : (
             <Image
               src="/oldpeople.jpg"
               alt="Family"
-              fill
-              sizes="(max-width: 720px) 92vw, 720px"
-              className="object-contain"
-              priority
+              width={400}
+              height={400}
+              className="w-full h-full object-cover rounded-2xl shadow"
             />
           )}
           <canvas ref={canvasRef} className="hidden" />
         </div>
 
         <div
-          className={`shadow flex justify-center items-center bg-sky-50 rounded-2xl w-[min(92vw,300px)] h-[50px] ${toggleLocked ? "opacity-50 pointer-events-none" : ""}`}
+          className={`shadow flex justify-center items-center bg-sky-50 rounded-2xl w-[300px] h-[50px] ${toggleLocked ? "opacity-50 pointer-events-none" : ""}`}
         >
           <button
             type="button"
