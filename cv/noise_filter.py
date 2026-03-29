@@ -10,16 +10,25 @@ def should_send(
     prev_sent: Optional[Observation],
     *,
     in_concern_window: bool = False,
-    min_confidence: float = 0.6,
+    min_pose_confidence: float = 0.5,
+    min_activity_confidence: float = 0.55,
     min_frame_quality: float = 0.4,
 ) -> bool:
+    """
+    Gate before Snowflake. Thresholds align with cv_pipeline outputs:
+    - Pose uses max(0.5, visibility) → floor 0.5
+    - IDLE / lying-idle activities use 0.55 (not 0.6), so a single min for both blocked almost all idle frames.
+    """
     if obs.frame_quality < min_frame_quality:
         return False
 
     if not obs.person_detected and not in_concern_window:
         return False
 
-    if obs.pose_confidence < min_confidence or obs.activity_confidence < min_confidence:
+    if (
+        obs.pose_confidence < min_pose_confidence
+        or obs.activity_confidence < min_activity_confidence
+    ):
         return False
 
     if prev_sent is None:
