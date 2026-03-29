@@ -12,7 +12,7 @@ def should_send(
     in_concern_window: bool = False,
     min_pose_confidence: float = 0.5,
     min_activity_confidence: float = 0.55,
-    min_frame_quality: float = 0.3,
+    min_frame_quality: float = 0.2,
 ) -> bool:
     """
     Gate before Snowflake. Thresholds align with cv_pipeline outputs:
