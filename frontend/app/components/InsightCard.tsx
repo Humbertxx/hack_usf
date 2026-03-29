@@ -9,6 +9,8 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+import { useState } from "react";
+
 type InsightCardProps = {
   person: "grandma" | "grandpa";
   metric?: number;
@@ -20,6 +22,8 @@ export default function InsightCard({
   setmetric,
   metric,
 }: InsightCardProps) {
+  const [message, setmessage] = useState("");
+  const [recievedmessage, setreceivedmessage] = useState("test");
   const chartDataMap: Record<number, unknown[]> = {
     1: [
       // Activity Data
@@ -119,7 +123,25 @@ export default function InsightCard({
   return (
     <>
       <div className="flex flex-wrap justify-between items-center gap-5 w-[100%]">
-        <div></div>
+        <div className="flex flex-col items-center w-[100%] gap-1">
+          <div className="bg-white w-[100%] h-[200px] shadow flex items-center justify-center text-gray-600 text-xl rounded-2xl">
+            {recievedmessage}
+          </div>
+          <div className="flex items-center justify-between w-[100%]">
+            <input
+              className="bg-sky-50 w-[45%] h-10 rounded-md shadow"
+              placeholder="Type your message..."
+              value={message || ""}
+              onChange={(e) => setmessage(e.target.value)}
+            ></input>
+            <button
+              onClick={() => setmessage("")}
+              className="bg-sky-50 w-[45%] h-10 rounded-md shadow hover:bg-sky-200 transition duration-100 ease-in"
+            >
+              Send
+            </button>
+          </div>
+        </div>
         {titleData[person].map((item, index) => (
           <button
             key={index}
