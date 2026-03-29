@@ -10,15 +10,15 @@
 #
 # MediaPipe pose: default CV_POSE_BACKEND=tasks (BlazePose heavy landmarker only; no legacy fallback).
 # Set none to disable pose, or legacy only if you need mediapipe.solutions.pose. Heavy model caches under cv/.cache/
-# Headless containers: MediaPipe *tasks* may need OpenGL ES (`libGLESv2.so.2`). If startup fails, try:
+# Headless Linux / RunPod: MediaPipe Tasks links libGLESv2.so.2 — install Mesa GLES (not a pip package):
 #   apt-get update && apt-get install -y libgles2-mesa
-# or rely on `auto` falling back to pose disabled when tasks cannot load (YOLO still runs).
+# If the server must start without pose: export CV_POSE_BACKEND=none (YOLO + ReID still run; pose/activity heuristics off).
 #
 # Accuracy tuning (GPU with headroom): defaults are yolov8l + imgsz 960 + osnet_x1_0. Override:
 #   CV_YOLO_MODEL=yolov8x.pt   # n/s/m/l/x — larger = slower, often more accurate
 #   CV_YOLO_IMGSZ=960           # 320–1280; higher helps small objects (FPS drops)
 #   CV_REID_MODEL=osnet_x1_0    # e.g. osnet_ain_x1_0 — changing ReID requires re-enrolling subjects
-#   CV_YOLO_ALLOWED_LABELS=person,cup,tv,...  # optional; replaces default indoor-focused COCO allowlist
+#   CV_YOLO_ALLOWED_LABELS=person,cup,tv,...  # optional; replaces default expo-focused allowlist
 
 fastapi>=0.115.0
 python-multipart>=0.0.9

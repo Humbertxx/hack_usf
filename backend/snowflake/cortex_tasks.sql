@@ -18,7 +18,7 @@ SELECT
             'pose', r.POSE,
             'activity', r.ACTIVITY,
             'objects', r.OBJECTS_DETECTED,
-            'room', r.ROOM_HINT,
+            'room', 'unknown',
             'time', TO_CHAR(r.OBSERVED_AT, 'HH12:MI AM')
         )::STRING
     ) as NATURAL_DESCRIPTION,
@@ -28,6 +28,7 @@ SELECT
         WHEN r.MOTION_LEVEL = 'none' AND r.MINUTES_SINCE_LAST_SEEN > 60 THEN 4
         WHEN r.POSE = 'lying' AND HOUR(r.OBSERVED_AT) BETWEEN 10 AND 20 THEN 5
         WHEN r.ACTIVITY = 'eating' THEN 9
+        WHEN r.ACTIVITY = 'drinking' THEN 9
         WHEN r.MOTION_LEVEL = 'normal' THEN 8
         ELSE 7
     END as WELLNESS_SCORE,

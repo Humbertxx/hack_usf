@@ -2,6 +2,7 @@ import os
 import json
 from datetime import datetime, timezone
 from typing import Any, List, Optional
+from zoneinfo import ZoneInfo
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 from snowflake.connector.constants import PARAMETER_PYTHON_CONNECTOR_QUERY_RESULT_FORMAT
@@ -10,6 +11,18 @@ from models import Observation, Alert
 from config import MAX_LIMIT
 
 # remember init in class is related to .env
+
+_US_EASTERN = ZoneInfo("America/New_York")
+
+
+def _to_us_eastern_naive(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_US_EASTERN).replace(tzinfo=None)
+
+
+def _now_us_eastern_naive() -> datetime:
+    return datetime.now(_US_EASTERN).replace(tzinfo=None)
 
 
 def _normalize_objects_detected(value: Any) -> str:
@@ -61,6 +74,9 @@ class SnowflakeClient:
                 "PYTHON_CONNECTOR_QUERY_RESULT_FORMAT": "JSON"
             }
         )
+        cur = self.conn.cursor()
+        cur.execute("ALTER SESSION SET TIMEZONE = 'America/New_York'")
+        cur.close()
         self.observation_buffer: List[dict] = []
         self.alert_buffer: List[dict] = []
         self.BATCH_SIZE = 10
@@ -69,12 +85,12 @@ class SnowflakeClient:
     
     def add_observation(self, obs: Observation):
         """Add observation to buffer. Flushes when batch size reached."""
-        observed_at = obs.observed_at
-        if getattr(observed_at, "tzinfo", None) is not None:
-            observed_at = observed_at.astimezone(timezone.utc).replace(tzinfo=None)
+        observed_at = _to_us_eastern_naive(obs.observed_at)
+        inserted_at = _now_us_eastern_naive()
         row = {
             'ID': obs.id,
             'OBSERVED_AT': observed_at,
+            'INSERTED_AT': inserted_at,
             'PERSON_DETECTED': obs.person_detected,
             'PRIMARY_PERSON_ID': getattr(obs, 'primary_person_id', None),
             'PRIMARY_DISPLAY_NAME': getattr(obs, 'primary_display_name', None),
@@ -98,15 +114,15 @@ class SnowflakeClient:
     
     def add_alert(self, alert: Alert):
         """Add alert to buffer. Alerts are also flushed with observations."""
-        triggered_at = alert.triggered_at
-        if getattr(triggered_at, "tzinfo", None) is not None:
-            triggered_at = triggered_at.astimezone(timezone.utc).replace(tzinfo=None)
+        triggered_at = _to_us_eastern_naive(alert.triggered_at)
+        inserted_at = _now_us_eastern_naive()
         row = {
             'ID': alert.id,
             'OBSERVATION_ID': alert.observation_id,
             'ALERT_TYPE': alert.alert_type,
             'SEVERITY': alert.severity.value if hasattr(alert.severity, 'value') else alert.severity,
             'TRIGGERED_AT': triggered_at,
+            'INSERTED_AT': inserted_at,
             'QUICK_MESSAGE': alert.quick_message,
             'ACKNOWLEDGED': alert.acknowledged
         }

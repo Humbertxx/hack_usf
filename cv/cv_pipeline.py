@@ -141,36 +141,43 @@ def _visibility(lm: Any) -> float:
 
 def _infer_activity(pose: PoseType, labels: Set[str]) -> Tuple[ActivityType, float]:
     """
-    Infer activity from pose and detected objects.
-    
-    When pose is UNKNOWN but we have contextual objects, we can still infer activity.
+    Infer activity from pose and detected objects (eating vs drinking vs idle/unknown).
+    Beverage-only detections map to drinking; food/utensils map to eating (including meal + drink).
     """
     labels_l = {x.lower() for x in labels}
-    
-    # Contextual object sets
-    media_objects = {"tv", "laptop", "remote"}
-    dining_objects = {"bowl", "banana", "apple", "bottle", "cup", "fork", "knife", "spoon", "sandwich", "pizza"}
+
+    food_eating = {
+        "bowl",
+        "banana",
+        "apple",
+        "fork",
+        "knife",
+        "spoon",
+        "sandwich",
+        "pizza",
+        "cake",
+        "carrot",
+        "orange",
+        "broccoli",
+    }
+    beverage = {"bottle", "cup", "wine glass"}
+
+    upright = (PoseType.SITTING, PoseType.STANDING, PoseType.UNKNOWN)
 
     if pose == PoseType.LYING:
         return ActivityType.IDLE, 0.55
-    if media_objects & labels_l and pose in (PoseType.SITTING, PoseType.LYING, PoseType.UNKNOWN):
-        return ActivityType.WATCHING_TV, 0.65 if pose != PoseType.UNKNOWN else 0.5
-    if dining_objects & labels_l and pose in (
-        PoseType.SITTING,
-        PoseType.STANDING,
-        PoseType.UNKNOWN,  # Eating at table with partial visibility
-    ):
+    if food_eating & labels_l and pose in upright:
         return ActivityType.EATING, 0.65 if pose != PoseType.UNKNOWN else 0.5
-    
-    # For UNKNOWN pose, try to infer from furniture context
+    if beverage & labels_l and pose in upright:
+        return ActivityType.DRINKING, 0.65 if pose != PoseType.UNKNOWN else 0.5
+
     if pose == PoseType.UNKNOWN:
         if {"chair", "dining table"} & labels_l:
-            # Sitting at table (common scenario: camera across table)
             return ActivityType.IDLE, 0.5
         if {"couch", "sofa"} & labels_l:
             return ActivityType.IDLE, 0.5
         return ActivityType.UNKNOWN, 0.4
-        
+
     return ActivityType.IDLE, 0.55
 
 
@@ -356,48 +363,27 @@ def _normalize_yolo_label(label: str) -> str:
     return " ".join(label.strip().lower().split())
 
 
-# Default COCO-80 allowlist after removing:
-# - All vehicles (bicycle, car, motorcycle, airplane, bus, train, truck, boat)
-# - Travel / mobility gear (skis, snowboard, skateboard, surfboard, suitcase)
-# - Outdoor-only street & play (traffic light, fire hydrant, stop sign, parking meter, bench, kite, frisbee)
-# - Animals except cat and dog
-# - Extra indoor-clutter / non-priority: backpack, baseball bat/glove, bed, clock, donut, hair drier,
-#   handbag, hot dog, keyboard, laptop, mouse, oven, sports ball, teddy bear, tennis racket,
-#   tie, toilet, toothbrush, umbrella, vase
-#   (microwave, sink, etc. kept for indoor scene context)
-# Person is always kept in the detection loop (also in this set for activity labels).
+# Hackathon / expo default: person + chair (scale/context) + eat/drink COCO classes only.
+# No kitchen fixtures, TV/remote, couch, dining table, pets, or clutter — use CV_YOLO_ALLOWED_LABELS to widen.
+# Person is always kept in the detection loop (class 0); this set is for non-person labels.
 _YOLO_DEFAULT_ALLOWED_LABELS: frozenset[str] = frozenset(
     {
         "apple",
         "banana",
-        "book",
         "bottle",
         "bowl",
         "broccoli",
         "cake",
         "carrot",
-        "cat",
-        "cell phone",
         "chair",
-        "couch",
         "cup",
-        "dining table",
-        "dog",
         "fork",
         "knife",
-        "microwave",
         "orange",
         "person",
         "pizza",
-        "potted plant",
-        "refrigerator",
-        "remote",
         "sandwich",
-        "scissors",
-        "sink",
         "spoon",
-        "toaster",
-        "tv",
         "wine glass",
     }
 )
@@ -677,9 +663,8 @@ class CVPipeline:
 
         observed_at = datetime.now(timezone.utc)
         oid = str(uuid.uuid4())
+        # Expo demo: no room layout; column kept for schema / Snowflake compatibility.
         room_hint = "unknown"
-        if labels:
-            room_hint = labels[0]
 
         is_fall_risk = person_detected and pose_type == PoseType.LYING and pose_conf >= 0.45
 

@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS RAW_OBSERVATIONS (
     ID VARCHAR(36) PRIMARY KEY,
 
 
+    -- OBSERVED_AT / INSERTED_AT: US Eastern local wall time (America/New_York), TIMESTAMP_NTZ (writers set explicitly).
     OBSERVED_AT TIMESTAMP_NTZ NOT NULL,
     INSERTED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     
@@ -27,12 +28,12 @@ CREATE TABLE IF NOT EXISTS RAW_OBSERVATIONS (
     POSE_CONFIDENCE FLOAT NOT NULL,
     
     -- Activity inference
-    ACTIVITY STRING,                -- 'eating', 'watching_tv', 'idle', 'unknown'
+    ACTIVITY STRING,                -- 'eating', 'drinking', 'idle', 'unknown'
     ACTIVITY_CONFIDENCE FLOAT,
     
     -- Context
     OBJECTS_DETECTED VARIANT,         -- ['cup', 'remote', 'book']
-    ROOM_HINT VARCHAR(50),               -- 'kitchen', 'living_room', 'bedroom'
+    ROOM_HINT VARCHAR(50),               -- expo: typically 'unknown' (no room inference)
     
     -- Alert-relevant flags
     IS_FALL_RISK BOOLEAN DEFAULT FALSE,
@@ -57,6 +58,7 @@ CREATE TABLE IF NOT EXISTS ALERTS (
     QUICK_MESSAGE VARCHAR(500),
     
     --timestamps
+    -- TRIGGERED_AT / INSERTED_AT: US Eastern local wall time when using Python writers.
     TRIGGERED_AT TIMESTAMP_NTZ NOT NULL,
     INSERTED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
 

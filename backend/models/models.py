@@ -17,7 +17,7 @@ class PoseType(str, Enum):
 
 class ActivityType(str, Enum):
     EATING = "eating"
-    WATCHING_TV = "watching_tv"
+    DRINKING = "drinking"
     IDLE = "idle"
     UNKNOWN = "unknown"
 

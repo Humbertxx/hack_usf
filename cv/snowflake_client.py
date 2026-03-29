@@ -10,8 +10,23 @@ import json
 import os
 from datetime import datetime, timezone
 from typing import Any, List, Optional, Tuple, Union
+from zoneinfo import ZoneInfo
 
 from cv.models import Alert, Observation
+
+# Snowflake RAW_OBSERVATIONS uses TIMESTAMP_NTZ; we store America/New_York local wall time.
+_US_EASTERN = ZoneInfo("America/New_York")
+
+
+def _to_us_eastern_naive(dt: datetime) -> datetime:
+    """Interpret naive datetimes as UTC (pipeline default), then convert to US Eastern wall clock."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_US_EASTERN).replace(tzinfo=None)
+
+
+def _now_us_eastern_naive() -> datetime:
+    return datetime.now(_US_EASTERN).replace(tzinfo=None)
 
 
 def _normalize_objects_detected(value: Any) -> str:
@@ -80,8 +95,9 @@ class SnowflakeClient:
         self.last_flush = datetime.now(timezone.utc)
         self.FLUSH_INTERVAL_SECONDS = 30
         
-        # Verify connection by checking current context
+        # Align session clock with stored NTZ convention (US Eastern local).
         cursor = self.conn.cursor()
+        cursor.execute("ALTER SESSION SET TIMEZONE = 'America/New_York'")
         cursor.execute("SELECT CURRENT_DATABASE(), CURRENT_SCHEMA(), CURRENT_USER()")
         ctx = cursor.fetchone()
         cursor.close()
@@ -89,13 +105,13 @@ class SnowflakeClient:
     
     def add_observation(self, obs: Observation) -> None:
         """Add observation to buffer. Flushes when batch size reached."""
-        observed_at = obs.observed_at
-        if getattr(observed_at, "tzinfo", None) is not None:
-            observed_at = observed_at.astimezone(timezone.utc).replace(tzinfo=None)
-        
+        observed_at = _to_us_eastern_naive(obs.observed_at)
+        inserted_at = _now_us_eastern_naive()
+
         row = {
             "ID": obs.id,
             "OBSERVED_AT": observed_at,
+            "INSERTED_AT": inserted_at,
             "PERSON_DETECTED": obs.person_detected,
             "PRIMARY_PERSON_ID": obs.primary_person_id,
             "PRIMARY_DISPLAY_NAME": obs.primary_display_name,
@@ -125,16 +141,16 @@ class SnowflakeClient:
     
     def add_alert(self, alert: Alert) -> None:
         """Add alert to buffer. Alerts are high priority - flush immediately."""
-        triggered_at = alert.triggered_at
-        if getattr(triggered_at, "tzinfo", None) is not None:
-            triggered_at = triggered_at.astimezone(timezone.utc).replace(tzinfo=None)
-        
+        triggered_at = _to_us_eastern_naive(alert.triggered_at)
+        inserted_at = _now_us_eastern_naive()
+
         row = {
             "ID": alert.id,
             "OBSERVATION_ID": alert.observation_id,
             "ALERT_TYPE": alert.alert_type,
             "SEVERITY": alert.severity.value if hasattr(alert.severity, "value") else alert.severity,
             "TRIGGERED_AT": triggered_at,
+            "INSERTED_AT": inserted_at,
             "QUICK_MESSAGE": alert.quick_message,
             "ACKNOWLEDGED": alert.acknowledged,
         }

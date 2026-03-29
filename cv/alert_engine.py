@@ -13,6 +13,7 @@ class AlertEngineState:
     previous_pose: Optional[PoseType] = None
     last_person_seen_at: Optional[datetime] = None
     motion_none_since: Optional[datetime] = None
+    cold_start_lying_emitted: bool = False
 
 
 class AlertEngine:
@@ -26,6 +27,7 @@ class AlertEngine:
         now: Optional[datetime] = None,
         no_motion_threshold: timedelta = timedelta(minutes=30),
         not_seen_since_person_threshold: timedelta = timedelta(minutes=120),
+        cold_start_pose_confidence: float = 0.45,
     ) -> Optional[Alert]:
         t = now or datetime.now(timezone.utc)
         obs_time = observation.observed_at
@@ -44,17 +46,39 @@ class AlertEngine:
         else:
             self._state.motion_none_since = None
 
-        if (
-            observation.pose == PoseType.LYING
-            and prev_pose in (PoseType.STANDING, PoseType.WALKING)
+        # Fall / collapse: upright or seated → lying (aligns with is_fall_risk on sustained lying).
+        if observation.pose == PoseType.LYING and prev_pose in (
+            PoseType.STANDING,
+            PoseType.WALKING,
+            PoseType.SITTING,
         ):
             return Alert(
                 id=str(uuid.uuid4()),
                 observation_id=observation.id,
                 alert_type="fall_detected",
                 severity=Severity.CRITICAL,
-                triggered_at=t,
-                quick_message="Possible fall: transitioned to lying from standing/walking",
+                triggered_at=obs_time,
+                quick_message=(
+                    "Possible fall: transitioned to lying from standing, walking, or sitting"
+                ),
+            )
+
+        # Session starts with person already lying — one alert per engine lifetime (demo / cold start).
+        if (
+            prev_pose is None
+            and observation.pose == PoseType.LYING
+            and observation.person_detected
+            and observation.pose_confidence >= cold_start_pose_confidence
+            and not self._state.cold_start_lying_emitted
+        ):
+            self._state.cold_start_lying_emitted = True
+            return Alert(
+                id=str(uuid.uuid4()),
+                observation_id=observation.id,
+                alert_type="fall_detected",
+                severity=Severity.CRITICAL,
+                triggered_at=obs_time,
+                quick_message="Person on ground at session start — verify",
             )
 
         if observation.person_detected and self._state.motion_none_since is not None:

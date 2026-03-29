@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useOldPeopleContext } from "./OldPeopleContext";
 import { enrollmentSuccessDashboardHref } from "@/lib/enrollment-flags";
@@ -90,6 +90,11 @@ export default function Home() {
   const [enrollPhotoStep, setEnrollPhotoStep] = useState(1);
   const [enrollError, setEnrollError] = useState<string | null>(null);
   const [isEnrolling, setIsEnrolling] = useState(false);
+  /** 3 → 1 while waiting before shutter; null when idle */
+  const [captureCountdown, setCaptureCountdown] = useState<number | null>(null);
+  const captureCountdownAbortRef = useRef(false);
+  /** True from first capture tap through countdown + upload (avoids double-starts before state updates). */
+  const shutterSequenceRef = useRef(false);
 
   useEffect(() => {
     if (oldPeople !== 3) {
@@ -140,6 +145,9 @@ export default function Home() {
   }, []);
 
   const startCameraWithReset = useCallback(() => {
+    captureCountdownAbortRef.current = true;
+    shutterSequenceRef.current = false;
+    setCaptureCountdown(null);
     setEnrollPhotoStep(1);
     setEnrollError(null);
     setIsCameraActive(true);
@@ -225,6 +233,38 @@ export default function Home() {
     }
   };
 
+  const waitCaptureCountdown = async (): Promise<boolean> => {
+    captureCountdownAbortRef.current = false;
+    for (let n = 3; n >= 1; n--) {
+      if (captureCountdownAbortRef.current) {
+        setCaptureCountdown(null);
+        return false;
+      }
+      setCaptureCountdown(n);
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 1000);
+      });
+    }
+    if (captureCountdownAbortRef.current) {
+      setCaptureCountdown(null);
+      return false;
+    }
+    setCaptureCountdown(null);
+    return true;
+  };
+
+  const captureAfterCountdown = async (subjectId: "grandma" | "grandpa") => {
+    if (isEnrolling || shutterSequenceRef.current) return;
+    shutterSequenceRef.current = true;
+    try {
+      const proceed = await waitCaptureCountdown();
+      if (!proceed) return;
+      await captureAndEnroll(subjectId);
+    } finally {
+      shutterSequenceRef.current = false;
+    }
+  };
+
   const grandpa = () => {
     if (duoStep !== "idle" || isCameraActive) return;
     if (oldPeople === 2) setOldPeople(0);
@@ -247,6 +287,9 @@ export default function Home() {
   };
 
   const cancelCamera = () => {
+    captureCountdownAbortRef.current = true;
+    shutterSequenceRef.current = false;
+    setCaptureCountdown(null);
     stopVideoTracks();
     setIsCameraActive(false);
     setDuoStep("idle");
@@ -254,7 +297,16 @@ export default function Home() {
     setEnrollError(null);
   };
 
+  const isCaptureBusy = isEnrolling || captureCountdown !== null;
   const toggleLocked = duoStep !== "idle" || isCameraActive;
+  const enrollingLabel = useMemo(() => {
+    if (!isCameraActive) return null;
+    if (oldPeople === 1) return "Enrolling Grandma";
+    if (oldPeople === 2) return "Enrolling Grandpa";
+    if (oldPeople === 3 && duoStep === "grandma") return "Duo flow · Grandma (1 of 2)";
+    if (oldPeople === 3 && duoStep === "grandpa") return "Duo flow · Grandpa (2 of 2)";
+    return null;
+  }, [isCameraActive, oldPeople, duoStep]);
   const stepMeta = PHOTO_STEPS[enrollPhotoStep - 1];
   const guideVariant = stepMeta.key;
 
@@ -309,29 +361,46 @@ export default function Home() {
               className="w-full h-full object-cover rounded-2xl shadow"
             />
           )}
+          {isCameraActive && captureCountdown !== null && (
+            <div
+              className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl bg-black/45 pointer-events-none"
+              aria-live="polite"
+            >
+              <span className="text-8xl font-bold text-white tabular-nums leading-none drop-shadow-lg">
+                {captureCountdown}
+              </span>
+              <span className="mt-4 text-lg font-medium text-white/95">Hold still…</span>
+            </div>
+          )}
           <canvas ref={canvasRef} className="hidden" />
         </div>
 
-        <div
-          className={`shadow flex justify-center items-center bg-sky-50 rounded-2xl w-[300px] h-[50px] ${toggleLocked ? "opacity-50 pointer-events-none" : ""}`}
-        >
-          <button
-            type="button"
-            onClick={() => grandma()}
-            disabled={toggleLocked}
-            className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-l-2xl hover:scale-105 transition duration-100 ease-in disabled:hover:scale-100 ${oldPeople === 1 || oldPeople === 3 ? "bg-sky-200" : ""}`}
+        {isCameraActive && enrollingLabel ? (
+          <p className="text-center text-sky-900 font-semibold text-base max-w-sm px-2">
+            {enrollingLabel}
+          </p>
+        ) : (
+          <div
+            className={`shadow flex justify-center items-center bg-sky-50 rounded-2xl w-[300px] h-[50px] ${toggleLocked ? "opacity-50 pointer-events-none" : ""}`}
           >
-            grandma
-          </button>
-          <button
-            type="button"
-            onClick={() => grandpa()}
-            disabled={toggleLocked}
-            className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-r-2xl hover:scale-105 transition duration-100 ease-in disabled:hover:scale-100 ${oldPeople === 2 || oldPeople === 3 ? "bg-sky-200" : ""}`}
-          >
-            grandpa
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => grandma()}
+              disabled={toggleLocked}
+              className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-l-2xl hover:scale-105 transition duration-100 ease-in disabled:hover:scale-100 ${oldPeople === 1 || oldPeople === 3 ? "bg-sky-200" : ""}`}
+            >
+              grandma
+            </button>
+            <button
+              type="button"
+              onClick={() => grandpa()}
+              disabled={toggleLocked}
+              className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-r-2xl hover:scale-105 transition duration-100 ease-in disabled:hover:scale-100 ${oldPeople === 2 || oldPeople === 3 ? "bg-sky-200" : ""}`}
+            >
+              grandpa
+            </button>
+          </div>
+        )}
 
         {enrollError && (
           <p className="text-red-600 text-sm max-w-md text-center" role="alert">
@@ -348,10 +417,10 @@ export default function Home() {
           {oldPeople === 1 && (
             <button
               type="button"
-              disabled={isEnrolling}
+              disabled={isCaptureBusy}
               onClick={() =>
                 isCameraActive
-                  ? void captureAndEnroll("grandma")
+                  ? void captureAfterCountdown("grandma")
                   : startCameraWithReset()
               }
               className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
@@ -374,10 +443,10 @@ export default function Home() {
           {oldPeople === 2 && (
             <button
               type="button"
-              disabled={isEnrolling}
+              disabled={isCaptureBusy}
               onClick={() =>
                 isCameraActive
-                  ? void captureAndEnroll("grandpa")
+                  ? void captureAfterCountdown("grandpa")
                   : startCameraWithReset()
               }
               className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
@@ -413,8 +482,8 @@ export default function Home() {
           {oldPeople === 3 && duoStep === "grandma" && isCameraActive && (
             <button
               type="button"
-              disabled={isEnrolling}
-              onClick={() => void captureAndEnroll("grandma")}
+              disabled={isCaptureBusy}
+              onClick={() => void captureAfterCountdown("grandma")}
               className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
             >
               <p className="font-bold text-lg">
@@ -428,8 +497,8 @@ export default function Home() {
           {oldPeople === 3 && duoStep === "grandpa" && isCameraActive && (
             <button
               type="button"
-              disabled={isEnrolling}
-              onClick={() => void captureAndEnroll("grandpa")}
+              disabled={isCaptureBusy}
+              onClick={() => void captureAfterCountdown("grandpa")}
               className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
             >
               <p className="font-bold text-lg">
