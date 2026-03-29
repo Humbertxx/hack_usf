@@ -5,7 +5,7 @@ from typing import Optional
 from cv.models import Observation
 
 # High-confidence identity match bypasses pose/activity requirements
-# (e.g., sitting at desk where MediaPipe can't see full body)
+# (e.g., sitting at desk where MediaPipe can't see full body) test
 HIGH_IDENTITY_CONFIDENCE = 0.75
 
 
