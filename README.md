@@ -62,6 +62,23 @@ Open [http://localhost:3000](http://localhost:3000). Enrollment and related flow
 
 ---
 
+## Demo insights stack (dev-only Snowflake)
+
+Use the demo launcher when you want `/demo`, Timeline, Insights trends, and Insights chat to read from the unified FastAPI app (`:8000`) with a dev Snowflake database:
+
+```bash
+./scripts/run_frontend_snowflake_demo.sh
+```
+
+Operational checklist:
+
+- The script forces `SNOWFLAKE_DATABASE=GRANDMA_MONITOR_DEV` for the backend process and refuses an explicitly exported `SNOWFLAKE_DATABASE=GRANDMA_MONITOR` in your shell.
+- Keep your default root `.env` behavior unchanged for non-demo workflows; use this script or a separate shell session for demo runs instead of permanently rewriting `.env`.
+- Insights chat uses `SNOWFLAKE.CORTEX.COMPLETE` through FastAPI (`POST /api/insights-chat`); set `SNOWFLAKE_CORTEX_MODEL` only if you need a model override (default: `mistral-large`).
+- New demo-specific routes (`/api/insights-trends`, `/api/timeline`, `/api/insights-chat`) are guard-railed to dev DB names (`GRANDMA_MONITOR_DEV` or `_DEV`) unless emergency override `ALLOW_NON_DEV_SNOWFLAKE_FOR_INSIGHTS` is explicitly set.
+
+---
+
 ## Run the CV server (Python venv)
 
 From the **repository root** (so `cv` imports work as a package):

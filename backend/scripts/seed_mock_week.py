@@ -261,30 +261,12 @@ def build_day_schedule(
             motion_level=MotionLevel.LOW,
         ),
         obs_at(
-            8,
-            15,
-            pose=PoseType.SITTING,
-            activity=ActivityType.EATING,
-            room_hint="kitchen",
-            objects=["plate", "mug", "table"],
-            motion_level=MotionLevel.LOW,
-        ),
-        obs_at(
             10,
             40,
             pose=PoseType.SITTING,
             activity=ActivityType.DRINKING,
             room_hint="living_room",
             objects=["glass", "remote"],
-            motion_level=MotionLevel.LOW,
-        ),
-        obs_at(
-            12,
-            35,
-            pose=PoseType.SITTING,
-            activity=ActivityType.EATING,
-            room_hint="kitchen",
-            objects=["plate", "water_glass"],
             motion_level=MotionLevel.LOW,
         ),
         obs_at(
@@ -297,15 +279,6 @@ def build_day_schedule(
             motion_level=MotionLevel.NORMAL,
         ),
         obs_at(
-            18,
-            20,
-            pose=PoseType.SITTING,
-            activity=ActivityType.EATING,
-            room_hint="kitchen",
-            objects=["plate", "fork", "water_glass"],
-            motion_level=MotionLevel.LOW,
-        ),
-        obs_at(
             20,
             5,
             pose=PoseType.SITTING,
@@ -316,8 +289,37 @@ def build_day_schedule(
         ),
     ]
 
-    # Create snack rows by adding a second meal-window eating observation on alternating days.
-    if day_offset % 2 == 0:
+    subject_shift = 0 if subject.person_id == "grandma" else 1
+    skip_breakfast = (day_offset + subject_shift) % 5 == 0
+    skip_lunch = (day_offset + subject_shift) % 4 == 1
+    skip_dinner = (day_offset + subject_shift) % 6 == 2
+    include_snack = (day_offset + subject_shift) % 2 == 0
+
+    if not skip_breakfast:
+        rows.append(
+            obs_at(
+                8,
+                15,
+                pose=PoseType.SITTING,
+                activity=ActivityType.EATING,
+                room_hint="kitchen",
+                objects=["plate", "mug", "table"],
+                motion_level=MotionLevel.LOW,
+            )
+        )
+    if not skip_lunch:
+        rows.append(
+            obs_at(
+                12,
+                35,
+                pose=PoseType.SITTING,
+                activity=ActivityType.EATING,
+                room_hint="kitchen",
+                objects=["plate", "water_glass"],
+                motion_level=MotionLevel.LOW,
+            )
+        )
+    if include_snack:
         rows.append(
             obs_at(
                 16,
@@ -326,6 +328,18 @@ def build_day_schedule(
                 activity=ActivityType.EATING,
                 room_hint="living_room",
                 objects=["tea", "apple"],
+                motion_level=MotionLevel.LOW,
+            )
+        )
+    if not skip_dinner:
+        rows.append(
+            obs_at(
+                18,
+                20,
+                pose=PoseType.SITTING,
+                activity=ActivityType.EATING,
+                room_hint="kitchen",
+                objects=["plate", "fork", "water_glass"],
                 motion_level=MotionLevel.LOW,
             )
         )
@@ -340,6 +354,19 @@ def build_day_schedule(
                 activity=ActivityType.IDLE,
                 room_hint="hallway",
                 objects=["walker", "floor_mat"],
+                motion_level=MotionLevel.NONE,
+                is_fall_risk=True,
+            )
+        )
+    if day_offset in {1, 4} and subject.person_id == "grandpa":
+        rows.append(
+            obs_at(
+                22,
+                5,
+                pose=PoseType.LYING,
+                activity=ActivityType.IDLE,
+                room_hint="bedroom",
+                objects=["nightstand", "floor_mat"],
                 motion_level=MotionLevel.NONE,
                 is_fall_risk=True,
             )

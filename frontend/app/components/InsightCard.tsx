@@ -12,114 +12,85 @@ import {
 import { useState } from "react";
 import { Card, CardButton } from "./Card";
 
+export type TrendRow = {
+  date: string;
+  label: string;
+  meals_per_day: number;
+  falls_per_day: number;
+  activity_level: number;
+};
+
+export type InsightMetricKey = "meals" | "falls" | "activity";
+
 type InsightCardProps = {
   person: "grandma" | "grandpa";
-  metric?: number;
-  setmetric?: (value: number) => void;
+  metric: InsightMetricKey;
+  setMetric: (value: InsightMetricKey) => void;
+  trends: TrendRow[];
+  loading: boolean;
+  error: string | null;
 };
 
 export default function InsightCard({
   person,
-  setmetric,
+  setMetric,
   metric,
+  trends,
+  loading,
+  error,
 }: InsightCardProps) {
-  const [message, setmessage] = useState("");
-  const [recievedmessage, setreceivedmessage] = useState("test");
-  const chartDataMap: Record<number, unknown[]> = {
-    1: [
-      // Activity Data
-      { name: "Mon", sales: 4500, profit: 30 },
-      { name: "Tue", sales: 5200, profit: 45 },
-      { name: "Wed", sales: 3100, profit: 15 },
-      { name: "Thu", sales: 4800, profit: 35 },
-      { name: "Fri", sales: 6000, profit: 60 },
-      { name: "Sat", sales: 2000, profit: 10 },
-      { name: "Sun", sales: 3500, profit: 25 },
-    ],
-    2: [
-      // Sleep Data
-      { name: "Mon", sales: 7, profit: 2 },
-      { name: "Tue", sales: 6.5, profit: 1.5 },
-      { name: "Wed", sales: 8, profit: 3 },
-      { name: "Thu", sales: 7.2, profit: 2.2 },
-      { name: "Fri", sales: 5.5, profit: 1 },
-      { name: "Sat", sales: 9, profit: 4 },
-      { name: "Sun", sales: 8.5, profit: 3.5 },
-    ],
-    3: [
-      // Eating Data
-      { name: "Mon", sales: 3, profit: 2 },
-      { name: "Tue", sales: 2, profit: 4 },
-      { name: "Wed", sales: 3, profit: 1 },
-      { name: "Thu", sales: 3, profit: 2 },
-      { name: "Fri", sales: 1, profit: 5 },
-      { name: "Sat", sales: 2, profit: 3 },
-      { name: "Sun", sales: 3, profit: 2 },
-    ],
-    4: [
-      // Medical Data
-      { name: "Mon", sales: 72, profit: 110 },
-      { name: "Tue", sales: 75, profit: 115 },
-      { name: "Wed", sales: 70, profit: 108 },
-      { name: "Thu", sales: 82, profit: 125 },
-      { name: "Fri", sales: 74, profit: 112 },
-      { name: "Sat", sales: 68, profit: 105 },
-      { name: "Sun", sales: 71, profit: 109 },
-    ],
-  };
+  const [message, setMessage] = useState("");
+  const [receivedMessage, setReceivedMessage] = useState(
+    "Insights assistant is available after chat endpoint wiring.",
+  );
+  const [chatBusy, setChatBusy] = useState(false);
 
-  const titleData = {
-    grandma: [
-      {
-        name: "Activity Level",
-        measurement: "67 hrs/day",
-        description: "More active than usual.",
-      },
+  const totalMeals = trends.reduce((sum, row) => sum + row.meals_per_day, 0);
+  const totalFalls = trends.reduce((sum, row) => sum + row.falls_per_day, 0);
+  const avgMeals = trends.length ? totalMeals / trends.length : 0;
+  const avgActivity = trends.length
+    ? trends.reduce((sum, row) => sum + row.activity_level, 0) / trends.length
+    : 0;
 
-      {
-        name: "Sleep Quality",
-        measurement: "67%",
-        description: "Less sleep than normal",
-      },
+  const metricCards: Array<{
+    key: InsightMetricKey;
+    name: string;
+    measurement: string;
+    description: string;
+  }> = [
+    {
+      key: "meals",
+      name: "Meals/day",
+      measurement: `${avgMeals.toFixed(1)}/day`,
+      description: `${totalMeals} meals across 7 days`,
+    },
+    {
+      key: "falls",
+      name: "Falls/day",
+      measurement: `${totalFalls}`,
+      description: "Total fall alerts in this window",
+    },
+    {
+      key: "activity",
+      name: "Activity level",
+      measurement: `${Math.round(avgActivity)}/100`,
+      description: "Daily active-pose score",
+    },
+  ];
 
-      {
-        name: "Meal Regularity",
-        measurement: "100/100",
-        description: "Well fed.",
-      },
+  const chartData = trends.map((row) => ({
+    label: row.label,
+    value:
+      metric === "meals"
+        ? row.meals_per_day
+        : metric === "falls"
+          ? row.falls_per_day
+          : row.activity_level,
+  }));
 
-      {
-        name: "Well-Being Score",
-        measurement: "0/100",
-        description: "Uh oh.",
-      },
-    ],
-    grandpa: [
-      {
-        name: "Activity Level",
-        measurement: "76 hrs/day",
-        description: "More active than usual o.o.",
-      },
-
-      {
-        name: "Sleep Quality",
-        measurement: "67%",
-        description: "More sleep than normal",
-      },
-
-      {
-        name: "Meal Regularity",
-        measurement: "89/100",
-        description: "Quite well fed.",
-      },
-
-      {
-        name: "Well-Being Score",
-        measurement: "0/100",
-        description: "yea.",
-      },
-    ],
-  };
+  const chartStroke =
+    metric === "meals" ? "#3b82f6" : metric === "falls" ? "#ef4444" : "#10b981";
+  const personLabel = person === "grandma" ? "Grandma" : "Grandpa";
 
   return (
     <>
@@ -129,34 +100,70 @@ export default function InsightCard({
             hover={false}
             className="flex min-h-[200px] w-full items-center justify-center rounded-2xl bg-white/90 text-xl text-neutral-600"
           >
-            {recievedmessage}
+            {receivedMessage}
           </Card>
           <div className="flex w-full items-center justify-between gap-3">
             <input
               className="h-10 w-[45%] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] px-3 text-sm shadow-sm ring-1 ring-[var(--ring-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40"
               placeholder="Type your message..."
-              value={message || ""}
-              onChange={(e) => setmessage(e.target.value)}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
             />
             <button
               type="button"
-              onClick={() => setmessage("")}
+              disabled={chatBusy}
+              onClick={async () => {
+                const trimmed = message.trim();
+                if (!trimmed) return;
+                setChatBusy(true);
+                try {
+                  const response = await fetch("/api/insights-chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: trimmed, person_id: person }),
+                  });
+                  const payload = (await response.json().catch(() => null)) as
+                    | { reply?: string; detail?: string; error?: string }
+                    | null;
+                  if (!response.ok) {
+                    throw new Error(
+                      payload?.detail ||
+                        payload?.error ||
+                        "Failed to fetch insights chat response",
+                    );
+                  }
+                  const reply = payload?.reply?.trim();
+                  setReceivedMessage(
+                    reply || `No reply returned for ${personLabel}. Try a new question.`,
+                  );
+                  setMessage("");
+                } catch (err) {
+                  const errMsg =
+                    err instanceof Error ? err.message : "Failed to contact insights chat";
+                  setReceivedMessage(`Error: ${errMsg}`);
+                } finally {
+                  setChatBusy(false);
+                }
+              }}
               className="h-10 w-[45%] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] text-sm font-medium shadow-sm ring-1 ring-[var(--ring-subtle)] transition duration-200 hover:bg-[var(--surface-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40 ds-motion-hover"
             >
-              Send
+              {chatBusy ? "Sending..." : "Send"}
             </button>
           </div>
         </div>
-        {titleData[person].map((item, index) => (
+        {metricCards.map((item) => (
           <CardButton
-            key={index}
+            key={item.key}
             className={`flex flex-col items-start justify-center gap-2 md:h-[110px] md:w-[210px] 2xl:h-[180px] 2xl:w-[320px] ${
-              metric === index + 1
+              metric === item.key
                 ? "bg-[var(--surface-muted)] ring-emerald-600/30"
                 : ""
             }`}
-            onClick={() => setmetric?.(index + 1)}
+            onClick={() => setMetric(item.key)}
           >
+            <p className="text-sm font-medium uppercase tracking-wide text-neutral-500">
+              {item.name}
+            </p>
             <p className="text-2xl font-semibold tabular-nums">
               {item.measurement}
             </p>
@@ -167,34 +174,34 @@ export default function InsightCard({
           hover={false}
           className="h-[400px] min-h-[400px] w-full min-w-0 overflow-hidden p-3 md:p-4"
         >
-          {/* ResponsiveContainer makes the chart fill its parent div */}
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartDataMap[metric || 1]}>
-              {/* 1. The Grid */}
-              <CartesianGrid strokeDasharray="3 3" />
-
-              {/* 2. The Axes (dataKey must match your object keys) */}
-              <XAxis dataKey="name" />
-              <YAxis />
-
-              {/* 3. The Interactivity */}
-              <Tooltip />
-
-              {/* 4. The Visuals */}
-              <Line
-                type="monotone"
-                dataKey="sales"
-                stroke="#8884d8"
-                strokeWidth={2}
-              />
-              <Line type="monotone" dataKey="profit" stroke="#82ca9d" />
-            </LineChart>
-          </ResponsiveContainer>
+          {loading && chartData.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-neutral-500">
+              Loading weekly trends...
+            </div>
+          ) : error ? (
+            <div className="flex h-full items-center justify-center text-red-600">
+              {error}
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="label" />
+                <YAxis domain={metric === "activity" ? [0, 100] : ["auto", "auto"]} />
+                <Tooltip />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  stroke={chartStroke}
+                  strokeWidth={3}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 6 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </Card>
       </div>
     </>
   );
 }
-
-// <div className="flex items-center justify-center gap-6 flex-wrap p-1 mt-5"> old top div
-// <div className="flex flex-wrap gap-6">
