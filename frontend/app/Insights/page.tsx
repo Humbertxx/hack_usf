@@ -23,7 +23,7 @@ export default function Home() {
 
           <div className="flex gap-0 w-[200px] h-[50px] rounded-2xl border-0 bg-gray-200 justify-center">
             <button onClick={() => { setGrandma(!grandma);}} 
-            className={`hover:shadow w-[50%] h-full hover:scale-110 transition duration-100 ease-in ${grandma ? "bg-sky-200" : "bg-gray-200"}`}
+            className={`hover:shadow w-[50%] h-full hover:scale-110 rounded-tl-2xl rounded-bl-2xl transition duration-100 ease-in ${grandma ? "bg-sky-200" : "bg-gray-200"}`}
             >
               grandma
             </button>
@@ -31,16 +31,23 @@ export default function Home() {
               <button onClick={() => {
                 setGrandpa(!grandpa);
               }} 
-              className={`hover:shadow w-[50%] h-full hover:scale-110 transition duration-100 ease-in ${grandpa ? "bg-sky-200" : "bg-gray-200"}`}
+              className={`hover:shadow w-[50%] h-full hover:scale-110 rounded-tr-2xl rounded-br-2xl transition duration-100 ease-in ${grandpa ? "bg-sky-200" : "bg-gray-200"}`}
               >
                 grandpa
             </button>
           </div>
 
         </div>
+        {grandma && (
         <div className="flex justify-start gap-5 w-[90%] md:w-[80%]">
           <InsightCard />
-        </div>
+        </div> )}
+
+        {grandpa && (
+        <div className="flex justify-start gap-5 w-[90%] md:w-[80%]">
+          <InsightCard />
+        </div> )}
+        
       </div>
     </>
   );
