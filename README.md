@@ -1,153 +1,201 @@
-# hack_usf
+# ElderWatch (Hack USF 2026)
 
-Hackathon project for 2026 Hack USF.
+ElderWatch is an elderly-monitoring platform that combines computer vision, event pipelines, and a dashboard experience to help caregivers understand daily activity patterns, potential risk events, and trend summaries.
 
-## What lives where
+The system is designed to support both:
+- **Live CV workflows** (camera -> inference -> event stream)
+- **Demo analytics workflows** (Snowflake-backed seeded data -> insights + timeline + chat)
 
-| Area | Role |
-|------|------|
-| **`frontend/`** | Next.js 16 app. Dev server on port **3000**. The enrollment UI talks to the CV API via Next **Route Handlers** (for example `app/api/enroll/route.ts` forwards `POST` to the CV server so the browser avoids CORS issues). Those handlers default to **`http://localhost:8080`**. |
-| **`backend/`** | FastAPI-oriented modules (API shapes, models, Snowflake client, WebSocket helpers). The repository now has a root **`app.py`** that mounts backend routes and websockets, with optional CV mounting under **`/cv`** if CV dependencies import successfully. |
-| **`cv/`** | Computer vision pipeline and **FastAPI** app (`cv.main:app`): `/health`, `/enroll-subject`, `/subjects`, WebSocket `/ws`, etc. Dependencies in `cv/requirements.txt`; tests and GPU scripts under `cv/`. |
+---
 
-Other top-level folders (not exhaustive): **`capture/`** — Pi capture and RunPod/SSH helpers; **`shared/`** — types for frontend/backend; **`infra/`**, **`data/`**, **`scripts/`** — deployment and dev utilities.
+## High-Level Architecture
 
-CV tests expect imports from the repo root (`pythonpath` = repo root):
+```mermaid
+flowchart LR
+  cam[Camera / Capture Source] --> cv[CV Service<br/>cv.main:app :8080]
+  cv --> sf[(Snowflake)]
+  sf --> be[Unified FastAPI<br/>app.py :8000]
+  be --> fe[Next.js Frontend<br/>:3000]
+  fe --> user[Caregiver UI]
 
-```bash
-pip install -r cv/requirements-dev.txt
-cd cv && python -m pytest
+  fe -. Route Handlers .-> cv
+  fe -. Demo Route Handlers .-> be
 ```
 
 ---
 
-## Run the unified FastAPI app
+## In-Depth Pipelines
 
-From the **repository root**:
+### 1) CV Observation Pipeline
+
+```mermaid
+flowchart TD
+  A[Incoming Frame] --> B[YOLOv8 Detection]
+  B --> C[Primary Subject Association<br/>ReID + identity store]
+  C --> D[Pose + Activity Inference<br/>MediaPipe + heuristics]
+  D --> E[Noise / Confidence Filtering]
+  E --> F[Observation Object]
+  F --> G[Alert Engine<br/>fall/no-motion checks]
+  F --> H[Snowflake RAW_OBSERVATIONS]
+  G --> I[Snowflake ALERTS]
+  H --> J[Live event aggregation]
+  I --> J
+  J --> K[Dashboard APIs + WebSocket feed]
+```
+
+**Models currently used:**
+- **YOLOv8** (Ultralytics) for person/object detection
+- **MediaPipe Pose Landmarker (BlazePose heavy)** for pose landmarks
+- **OSNet ReID (torchreid)** for primary subject identity matching
+
+### 2) Demo Insights Pipeline (Snowflake-backed)
+
+```mermaid
+flowchart TD
+  A[Seed Script<br/>backend/scripts/seed_mock_week.py] --> B[RAW_OBSERVATIONS / ALERTS / LIVE_EVENTS<br/>GRANDMA_MONITOR_DEV]
+  B --> C[FastAPI Demo Routes<br/>/api/insights-trends<br/>/api/timeline<br/>/api/insights-chat]
+  C --> D[Next Route Handlers]
+  D --> E[Insights + Timeline UI]
+  C --> F[Snowflake Cortex Complete]
+  F --> E
+```
+
+**Safety model:**
+- Demo-only analytics/chat routes are guarded to **dev DB targets** (`*_DEV`, especially `GRANDMA_MONITOR_DEV`)
+- Production defaults remain unchanged
+
+---
+
+## Repository Structure
+
+| Directory | Purpose |
+|---|---|
+| `frontend/` | Next.js 16 dashboard app (port 3000) |
+| `backend/` | FastAPI routers, Snowflake access, demo analytics APIs |
+| `cv/` | CV inference service, models/pipeline, enrollment, identity tracking |
+| `capture/` | Capture scripts, RunPod/SSH helpers |
+| `scripts/` | Dev run helpers (including demo runner) |
+| `infra/` | Deployment/infra utilities |
+| `shared/` | Shared types/contracts |
+
+---
+
+## Prerequisites
+
+- Python 3.11+ (3.13 works for this repo)
+- Node.js 20+
+- npm
+- Snowflake account + credentials (for DB-backed features)
+
+Optional:
+- GPU/RunPod for higher-throughput CV inference
+
+---
+
+## Quick Start (Demo Analytics + Chat)
+
+This is the fastest way to run the dashboard with seeded mock data and AI analysis.
+
+### 1) Install dependencies
+
+From repo root:
 
 ```bash
-cd /path/to/hack_usf
-
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-
 pip install --upgrade pip
 pip install -r backend/requirements.txt
 
-uvicorn app:app --host 0.0.0.0 --port 8000
-```
-
-Useful endpoints:
-
-- `GET /health`
-- `GET /api/observations`
-- `GET /api/alerts`
-- `GET /api/live-events`
-- `WS /ws/live`
-- `GET /cv/health` if the CV app mounted successfully
-
----
-
-## Run the frontend (local)
-
-From `frontend/`:
-
-```bash
 cd frontend
 npm install
-npm run dev
+cd ..
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Enrollment and related flows expect a CV server (or tunnel) on **port 8080** on your Mac, because the Next API route proxies to `http://localhost:8080`.
+### 2) Configure environment
 
----
+Create root `.env` (or export vars) with at least:
 
-## Demo insights stack (dev-only Snowflake)
+```bash
+SNOWFLAKE_ACCOUNT=...
+SNOWFLAKE_USER=...
+SNOWFLAKE_PASSWORD=...
+SNOWFLAKE_WAREHOUSE=COMPUTE_WH
+SNOWFLAKE_DATABASE=GRANDMA_MONITOR_DEV
+SNOWFLAKE_SCHEMA=PUBLIC
+# Optional model override for insights chat:
+SNOWFLAKE_CORTEX_MODEL=mistral-large
+```
 
-Use the demo launcher when you want `/demo`, Timeline, Insights trends, and Insights chat to read from the unified FastAPI app (`:8000`) with a dev Snowflake database:
+### 3) Seed demo data
+
+```bash
+SNOWFLAKE_DATABASE=GRANDMA_MONITOR_DEV .venv/bin/python -m backend.scripts.seed_mock_week --include-grandpa --days 7
+```
+
+### 4) Run demo stack
 
 ```bash
 ./scripts/run_frontend_snowflake_demo.sh
 ```
 
-Operational checklist:
-
-- The script forces `SNOWFLAKE_DATABASE=GRANDMA_MONITOR_DEV` for the backend process and refuses an explicitly exported `SNOWFLAKE_DATABASE=GRANDMA_MONITOR` in your shell.
-- Keep your default root `.env` behavior unchanged for non-demo workflows; use this script or a separate shell session for demo runs instead of permanently rewriting `.env`.
-- Insights chat uses `SNOWFLAKE.CORTEX.COMPLETE` through FastAPI (`POST /api/insights-chat`); set `SNOWFLAKE_CORTEX_MODEL` only if you need a model override (default: `mistral-large`).
-- New demo-specific routes (`/api/insights-trends`, `/api/timeline`, `/api/insights-chat`) are guard-railed to dev DB names (`GRANDMA_MONITOR_DEV` or `_DEV`) unless emergency override `ALLOW_NON_DEV_SNOWFLAKE_FOR_INSIGHTS` is explicitly set.
+Then open:
+- `http://localhost:3000/demo` (sets demo session mode)
 
 ---
 
-## Run the CV server (Python venv)
+## Run Modes
 
-From the **repository root** (so `cv` imports work as a package):
+### A) Frontend only (UI development)
 
 ```bash
-cd /path/to/hack_usf
-
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-
-pip install --upgrade pip
-pip install -r cv/requirements.txt
-# torchreid often needs a separate install (see comments at bottom of cv/requirements.txt), e.g.:
-# pip install --no-build-isolation git+https://github.com/KaiyangZhou/deep-person-reid.git
+cd frontend
+npm run dev
 ```
 
-Optional: copy or symlink **`.env`** at the repo root if you use Snowflake from the CV app (credentials are documented in `my-docs/DB_SNOWFLAKE_CONFIG.md`).
-
-Start the API (same shell, venv activated, cwd = repo root):
+### B) Unified backend (port 8000)
 
 ```bash
+source .venv/bin/activate
+uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+Useful routes:
+- `GET /health`
+- `GET /api/live-events`
+- `GET /api/primary-state`
+- `GET /api/insights-trends`
+- `GET /api/timeline`
+- `POST /api/insights-chat`
+- `WS /ws/live`
+
+### C) CV service only (port 8080)
+
+```bash
+source .venv/bin/activate
+pip install -r cv/requirements.txt
 uvicorn cv.main:app --host 0.0.0.0 --port 8080
 ```
 
-Check [http://127.0.0.1:8080/health](http://127.0.0.1:8080/health). On a **GPU pod** (e.g. RunPod), install the CUDA PyTorch stack first — see comments in `cv/requirements.txt` and the RunPod section below.
-
 ---
 
-## SSH tunnel from MacBook → CV server (remote testing)
+## Remote GPU / RunPod Notes
 
-When the FastAPI app runs on a **remote** machine (GPU pod) and listens on **8080** (often only on `127.0.0.1` there), forward remote **8080** to your Mac’s **8080** so the Next.js app and `app/api/enroll/route.ts` keep using `http://localhost:8080`.
+If CV runs remotely, keep local frontend behavior by tunneling remote `8080` to local `8080`.
 
-### 1. Configure RunPod / SSH
-
-Copy `capture/runpod.env.example` to `capture/runpod.env` and set at least:
-
-- **`RUNPOD_IP`** — host that supports **local port forwarding** (`ssh -L`). **Not** `ssh.runpod.io` for `-L` (that gateway does not support it).
-- **`RUNPOD_PORT`** — SSH port.
-- Optional: **`RUNPOD_SSH_USER`**, **`RUNPOD_SSH_IDENTITY`**, **`LOCAL_PORT`** / **`REMOTE_PORT`** (defaults **8080**).
-
-If you only have RunPod’s HTTP proxy URL, use that URL from clients instead of a tunnel, or use a pod with direct SSH — see comments in `capture/autossh_setup.sh` and `capture/run_full_stack.sh`.
-
-### 2. Persistent tunnel with autossh (recommended)
-
-```bash
-brew install autossh
-cd /path/to/hack_usf
-./capture/autossh_setup.sh
-```
-
-That runs something equivalent to: local **8080** → remote **`127.0.0.1:8080`** (adjust with `LOCAL_PORT` / `REMOTE_PORT`). Leave the process running while you test.
-
-### 3. One-shot SSH (no autossh)
-
-Replace placeholders with values from `capture/runpod.env`:
+### One-shot tunnel
 
 ```bash
 ssh -N -L 8080:127.0.0.1:8080 -p RUNPOD_PORT RUNPOD_SSH_USER@RUNPOD_IP
 ```
 
-### 4. End-to-end dev loop
+### Persistent tunnel helper
 
-1. On the remote host (or locally): `uvicorn cv.main:app --host 0.0.0.0 --port 8080` (or bind to `127.0.0.1` if you only ever reach it via tunnel).
-2. On the Mac: tunnel as above so **localhost:8080** hits the remote API.
-3. On the Mac: `cd frontend && npm run dev` → use the web app; enrollment hits Next, which proxies to **localhost:8080**.
+```bash
+brew install autossh
+./capture/autossh_setup.sh
+```
 
----
-
-## RunPod (CUDA 12.8, PyTorch ≥ 2.8), from repository root
+### CUDA 12.8 lockstep install (RunPod)
 
 ```bash
 python3 -m venv .venv
@@ -157,36 +205,55 @@ pip install -r cv/requirements-cuda128.lockstep.txt
 bash cv/scripts/verify_runpod_gpu.sh
 ```
 
-### RunPod: `torch.cuda.is_available()` is False
+---
 
-The script prints `nvidia-smi`, device nodes, and a `libcuda` check before importing PyTorch. Use that order to narrow it down:
+## Demo/Production Safety Rules
 
-1. **No `/dev/nvidia*` or `nvidia-smi` fails** — The machine is not a working GPU pod (CPU template, wrong region, or runtime did not attach the GPU). Create or restart a pod that includes an NVIDIA GPU and uses a CUDA-capable image.
-2. **`nvidia-smi` works but PyTorch still says CUDA unavailable** — Often environment or a stale session:
-   - If **`NVIDIA_VISIBLE_DEVICES=void`**, CUDA is intentionally disabled for the container stack (`cuInit` fails, PyTorch sees no GPU). Run **`export NVIDIA_VISIBLE_DEVICES=all`** or **`unset NVIDIA_VISIBLE_DEVICES`** and try again; find what reset it (`grep -r void ~/.bashrc /etc/profile /workspace 2>/dev/null`).
-   - Run `echo "$CUDA_VISIBLE_DEVICES"`. If it is empty, run `unset CUDA_VISIBLE_DEVICES` (an empty value can break enumeration).
-   - Stop the pod and start it again; re-open a terminal and re-run the script in the same venv.
-3. **Driver / runtime mismatch** — Very new PyTorch (cu128) needs a host driver that supports that CUDA generation. If everything else looks fine, try another RunPod PyTorch or CUDA base image, or ask support whether the node’s driver matches CUDA 12.8.
-
-4. **`nvidia-smi` works but `/dev/nvidia0` is missing** — Some pods only expose `/dev/nvidiaN` (e.g. `nvidia7`). If you can write under `/dev`, try `ln -sf /dev/nvidia7 /dev/nvidia0` (or `bash cv/scripts/ensure_nvidia0_alias.sh`). **`mknod` is often blocked** on managed pods; a symlink may still work.
-
-5. **Symlink `/dev/nvidia0` exists but PyTorch still says CUDA unavailable** — The problem is not only the device name. Run `python3 cv/scripts/diagnose_cuda_driver.py` (it maps which `libcuda` is loaded and **re-tries once with `LD_LIBRARY_PATH` unset** if `cuInit` returns 999).
-
-6. **`LD_LIBRARY_PATH` includes `/usr/local/cuda`** — The linker may load the toolkit’s **stub** `libcuda` before the real driver in `/lib`; then **`cuInit` → CUDA_ERROR_UNKNOWN** and PyTorch shows the same. Run `unset LD_LIBRARY_PATH` (or drop the cuda entries) in the shell before Python, and fix any profile that exports it for interactive logins.
+- Demo analytics APIs are **dev DB guarded** and reject production DB names by default.
+- `scripts/run_frontend_snowflake_demo.sh` forces `SNOWFLAKE_DATABASE=GRANDMA_MONITOR_DEV` for its backend process.
+- Keep normal production/deployment docs under `backend/snowflake/` unchanged for operational flows.
 
 ---
 
-## Layout (quick reference)
+## Testing
 
-| Directory | Role |
-|-----------|------|
-| **`backend/`** | API modules, models, services (non-CV); no standalone server entry in-repo. |
-| **`cv/`** | Computer vision: models, pipeline, **FastAPI** `cv.main`, requirements, tests, RunPod GPU check script. |
-| **`frontend/`** | Web client (Next.js). |
-| **`infra/`** | Docker, deployment, server setup. |
-| **`capture/`** | Raspberry Pi capture script; RunPod/SSH helpers (`autossh_setup.sh`, `run_full_stack.sh`). |
-| **`shared/`** | Types/schemas used by backend + frontend (observations, alerts). |
-| **`data/`** | SQLite/db artifacts (if kept in repo for dev). |
-| **`scripts/`** | Setup/dev helpers. |
+### CV tests
 
-More detail on enrollment HTTP contracts: `my-docs/FRONTEND_CV_ENROLLMENT_API.md`.
+```bash
+source .venv/bin/activate
+pip install -r cv/requirements-dev.txt
+cd cv
+python -m pytest
+```
+
+### Frontend checks
+
+```bash
+cd frontend
+npm run lint
+npm run build
+```
+
+---
+
+## Troubleshooting
+
+- **`ModuleNotFoundError: snowflake`**  
+  Use the repo venv and install backend requirements:
+  `source .venv/bin/activate && pip install -r backend/requirements.txt`
+
+- **`Missing optional dependency: pandas` from Snowflake connector**  
+  Install extras + pyarrow:
+  `pip install "snowflake-connector-python[pandas]" pyarrow`
+
+- **Demo pages show unavailable**  
+  Open `/demo` first to enable demo session mode.
+
+- **Cortex chat errors**  
+  Verify role permissions for `SNOWFLAKE.CORTEX.COMPLETE` and model availability (`SNOWFLAKE_CORTEX_MODEL`).
+
+---
+
+## License
+
+See `LICENSE.md`.
