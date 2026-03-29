@@ -159,11 +159,21 @@ def create_app(
         obs = app.state.pipeline.process_frame(frame, session_id=session_id)
         obs_json = obs.model_dump(mode="json")
 
-        if not should_send_to_snowflake(
+        should_send_result = should_send_to_snowflake(
             obs,
             app.state.prev_sent,
             in_concern_window=in_concern_window,
-        ):
+        )
+        
+        if not should_send_result:
+            # Debug: show why it was filtered
+            if obs.primary_person_id:
+                print(f"[Snowflake Filter] Filtered despite identity: {obs.primary_display_name} (conf={obs.primary_identity_confidence:.3f})")
+                if app.state.prev_sent:
+                    same_pose = obs.pose == app.state.prev_sent.pose
+                    same_activity = obs.activity == app.state.prev_sent.activity
+                    same_objects = obs.objects_detected == app.state.prev_sent.objects_detected
+                    print(f"[Snowflake Filter] Duplicate check: pose={same_pose}, activity={same_activity}, objects={same_objects}")
             return ProcessFrameResponse(
                 ok=True,
                 filtered=True,
