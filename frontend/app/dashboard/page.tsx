@@ -165,7 +165,7 @@ function DashboardInner() {
     val: string;
   }
 
-  const [name] = useState("Grandma");
+  const [name] = useState("Grandpa");
   const [liveEvents, setLiveEvents] = useState<LiveEventItem[]>([]);
   const [eventsTz, setEventsTz] = useState(LIVE_EVENTS_TZ);
   const [eventsLoading, setEventsLoading] = useState(true);
