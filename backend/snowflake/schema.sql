@@ -3,54 +3,67 @@ USE SCHEMA PUBLIC;
 
 -- Raw observations from RunPod CV pipeline
 CREATE TABLE IF NOT EXISTS RAW_OBSERVATIONS (
-    ID STRING PRIMARY KEY,
+    ID VARCHAR(36) PRIMARY KEY,
+
+
     OBSERVED_AT TIMESTAMP_NTZ NOT NULL,
+    INSERTED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     
     -- Person state
     PERSON_DETECTED BOOLEAN NOT NULL,
-    POSE STRING,                    -- 'standing', 'sitting', 'lying', 'walking', 'unknown'
-    POSE_CONFIDENCE FLOAT,
+    PRIMARY_PERSON_ID VARCHAR(50),
+    PRIMARY_DISPLAY_NAME VARCHAR(100) 
+    IDENTITY_CONFIDENCE FLOAT, 
+
+
+    POSE  VARCHAR(20) NOT NULL,                    -- 'standing', 'sitting', 'lying', 'walking', 'unknown'
+    POSE_CONFIDENCE FLOAT NOT NULL,
     
     -- Activity inference
     ACTIVITY STRING,                -- 'eating', 'watching_tv', 'sleeping', 'cooking', 'idle'
     ACTIVITY_CONFIDENCE FLOAT,
     
     -- Context
-    OBJECTS_DETECTED ARRAY,         -- ['cup', 'remote', 'book']
-    ROOM_HINT STRING,               -- 'kitchen', 'living_room', 'bedroom'
+    OBJECTS_DETECTED VARIANT,         -- ['cup', 'remote', 'book']
+    ROOM_HINT VARCHAR(50),               -- 'kitchen', 'living_room', 'bedroom'
     
     -- Alert-relevant flags
     IS_FALL_RISK BOOLEAN DEFAULT FALSE,
-    MOTION_LEVEL STRING,            -- 'none', 'low', 'normal', 'high'
-    MINUTES_SINCE_LAST_SEEN INT DEFAULT 0,
+    MOTION_LEVEL VARCHAR(10),            -- 'none', 'low', 'normal', 'high'
+    MINUTES_SINCE_LAST_SEEN INTEGER DEFAULT 0,
     
     -- Quality metadata
     FRAME_QUALITY FLOAT,
-    SESSION_ID STRING,
-    
-    -- Audit
-    INSERTED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+    SESSION_ID VARCHAR(50) NOT NULL,
 )
 CLUSTER BY (OBSERVED_AT);
 
 -- Alerts table (for dashboard display)
 CREATE TABLE IF NOT EXISTS ALERTS (
-    ID STRING PRIMARY KEY,
-    OBSERVATION_ID STRING REFERENCES RAW_OBSERVATIONS(ID),
-    ALERT_TYPE STRING NOT NULL,         -- 'fall_detected', 'no_motion', 'not_seen'
-    SEVERITY STRING NOT NULL,           -- 'critical', 'warning', 'info'
+    ID VARCHAR(36) PRIMARY KEY,
+    
+    OBSERVATION_ID VARCHAR(36) REFERENCES RAW_OBSERVATIONS(ID),
+    
+    -- alert details
+    ALERT_TYPE  VARCHAR(30) NOT NULL,         -- 'fall_detected', 'no_motion', 'not_seen'
+    SEVERITY  VARCHAR(10) NOT NULL,   -- 'critical', 'warning', 'info'
+    QUICK_MESSAGE VARCHAR(500),
+    
+    --timestamps
     TRIGGERED_AT TIMESTAMP_NTZ NOT NULL,
-    
-    -- Human-friendly message (pre-computed, no Cortex delay)
-    QUICK_MESSAGE STRING,
-    
+    INSERTED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+
     -- Dashboard state
     ACKNOWLEDGED BOOLEAN DEFAULT FALSE,
     ACKNOWLEDGED_AT TIMESTAMP_NTZ,
-    ACKNOWLEDGED_BY STRING,
+    ACKNOWLEDGED_BY VARCHAR(100),
     
-    -- Audit
-    INSERTED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+    -- TRY CONTRAINS LATER !!!!!!!!!!!!
+    CONSTRAINT fk_observation 
+       FOREIGN KEY (OBSERVATION_ID) 
+       REFERENCES RAW_OBSERVATIONS(ID)
+
+    
 )
 CLUSTER BY (TRIGGERED_AT);
 
@@ -87,3 +100,34 @@ CREATE TABLE IF NOT EXISTS DAILY_SUMMARIES (
     UNIQUE (SUMMARY_DATE)
 )
 CLUSTER BY (SUMMARY_DATE);
+
+CREATE TABLE IF NOT EXISTS DETECTIONS (
+    -- Primary Key
+    ID VARCHAR(36) PRIMARY KEY,
+    
+    -- Foreign Key
+    OBSERVATION_ID VARCHAR(36) NOT NULL,       -- FK to RAW_OBSERVATIONS.ID
+    
+    -- Detection Details
+    LABEL VARCHAR(50) NOT NULL,                -- 'person', 'cup', 'tv', etc.
+    CONFIDENCE FLOAT NOT NULL,                 -- 0.0-1.0
+    BBOX VARIANT,                              -- JSON: [x1, y1, x2, y2] normalized 0-1
+    
+    -- Person-specific (only for LABEL='person')
+    PERSON_ID VARCHAR(50),                     -- 'grandma', 'grandpa', 'visitor_1'
+    DISPLAY_NAME VARCHAR(100),
+    IS_ENROLLED BOOLEAN DEFAULT FALSE,
+    IDENTITY_CONFIDENCE FLOAT,
+    
+    -- Metadata
+    INSERTED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    
+    -- Constraint
+    CONSTRAINT fk_det_observation 
+        FOREIGN KEY (OBSERVATION_ID) 
+        REFERENCES RAW_OBSERVATIONS(ID)
+);
+
+-- Index for observation lookups
+CREATE INDEX IF NOT EXISTS idx_det_observation 
+ON DETECTIONS (OBSERVATION_ID);
