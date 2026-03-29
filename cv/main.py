@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import base64
 import os
+import uuid
+from collections import deque
 from contextlib import asynccontextmanager
+from datetime import timezone
 from pathlib import Path
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Deque, Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -24,11 +27,21 @@ from dotenv import load_dotenv
 from cv.alert_engine import AlertEngine
 from cv.cv_pipeline import CVPipeline
 from cv.identity_store import IdentityStore
-from cv.models import ActivityType, Alert, Observation
+from cv.models import ActivityType, Alert, Observation, PoseType
 from cv.noise_filter import should_send
 from cv.reid_embeddings import ReIDEmbedder
 from cv.snowflake_client import create_snowflake_client
+from cv.transition_events import (
+    DEDUPE_DRINKING,
+    DEDUPE_EATING,
+    DEDUPE_FALLEN,
+    collect_transition_events,
+)
 from cv.websocket_manager import WebSocketManager
+
+LIVE_EVENT_BUFFER_MAX = 200
+
+_LIVE_EVENT_THUMB_KEYS = frozenset({DEDUPE_EATING, DEDUPE_DRINKING, DEDUPE_FALLEN})
 
 # Snowflake / API gate for "this frame counts as the enrolled person."
 # Default 0.58 pairs with CV_REID_STICKY_THRESHOLD hysteresis (see cv_pipeline); raise if you want stricter storage.
@@ -38,6 +51,27 @@ def _min_identity_confidence() -> float:
         return float(raw)
     except ValueError:
         return 0.58
+
+
+def _fall_min_pose_confidence() -> float:
+    """
+    Minimum lying pose confidence to treat a fall alert as real for UI, Snowflake, and WS.
+
+    Default 0.55 balances missed floor poses vs false positives; tune via env.
+    """
+    raw = os.environ.get("CV_FALL_MIN_POSE_CONFIDENCE", "0.55").strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.55
+
+
+def _is_confirmed_fall(obs: Observation, alert: Optional[Alert]) -> bool:
+    if alert is None or alert.alert_type != "fall_detected":
+        return False
+    if obs.pose != PoseType.LYING:
+        return False
+    return obs.pose_confidence >= _fall_min_pose_confidence()
 
 
 def _load_runtime_env() -> None:
@@ -113,14 +147,31 @@ def _encode_frame_thumbnail_bgr(frame: np.ndarray) -> Optional[str]:
     return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
-def _should_persist_thumbnail(obs: Observation, alert: Optional[Alert]) -> bool:
-    if alert is not None and alert.alert_type == "fall_detected":
+def _should_persist_thumbnail(
+    obs: Observation,
+    alert: Optional[Alert],
+    *,
+    confirmed_fall: bool,
+) -> bool:
+    if confirmed_fall:
         return True
     if obs.is_fall_risk:
-        return True
+        return (
+            obs.pose == PoseType.LYING
+            and obs.pose_confidence >= _fall_min_pose_confidence()
+        )
     if obs.activity == ActivityType.EATING:
         return True
+    if obs.activity == ActivityType.DRINKING:
+        return True
     return False
+
+
+def _observed_at_iso(obs: Observation) -> str:
+    t = obs.observed_at
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return t.isoformat()
 
 
 class MockSnowflakeClient:
@@ -180,21 +231,35 @@ class SubjectListResponse(BaseModel):
 class LiveEventItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    id: Optional[str] = None
-    event_type: Optional[str] = None
-    headline: Optional[str] = None
-    summary: Optional[str] = None
-    meal_kind: Optional[str] = None
-    observed_at: Optional[str] = None
+    id: str
+    dedupe_key: str
+    event_type: str
+    headline: str
+    observed_at: str
     display_name: Optional[str] = None
     frame_thumb_base64: Optional[str] = None
+    summary: Optional[str] = None
+    meal_kind: Optional[str] = None
 
 
 class LiveEventsResponse(BaseModel):
-    """Live feed rows from Snowflake (LIVE_EVENTS + raw thumbnail)."""
+    """In-memory transition feed from the CV service (not Snowflake-scheduled)."""
 
     timezone: str = "America/New_York"
     events: List[LiveEventItem]
+
+
+class PrimaryStateResponse(BaseModel):
+    """Latest primary-person snapshot after a frame was persisted."""
+
+    present: bool = False
+    timezone: str = "America/New_York"
+    pose: Optional[str] = None
+    display_name: Optional[str] = None
+    observed_at: Optional[str] = None
+    session_id: Optional[str] = None
+    activity: Optional[str] = None
+    fallen_attention: bool = False
 
 
 def create_app(
@@ -221,10 +286,20 @@ def create_app(
     app.state.prev_sent: Observation | None = None
     app.state.identity_store = store
     app.state.reid_embedder: Optional[ReIDEmbedder] = None
+    app.state.live_event_buffer = deque(maxlen=LIVE_EVENT_BUFFER_MAX)
+    app.state.last_primary_snapshot: Optional[Dict[str, Any]] = None
+    app.state.fall_attention_latched = False
 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/primary-state", response_model=PrimaryStateResponse)
+    def primary_state() -> PrimaryStateResponse:
+        snap = app.state.last_primary_snapshot
+        if not snap:
+            return PrimaryStateResponse(present=False)
+        return PrimaryStateResponse(present=True, **snap)
 
     @app.get("/api/live-events", response_model=LiveEventsResponse)
     def live_events(
@@ -232,21 +307,13 @@ def create_app(
         limit: int = Query(default=50, ge=1, le=200),
     ) -> LiveEventsResponse:
         """
-        Recent rows from LIVE_EVENTS (populated by the CORTEX_LIVE_EVENTS task),
-        with optional frame thumbnails from RAW_OBSERVATIONS.
+        Recent transition events (newest first). The ``minutes`` query is ignored;
+        only the in-memory ring buffer is used.
         """
-        try:
-            raw = app.state.snowflake.get_recent_live_events(
-                since_minutes=minutes,
-                limit=limit,
-            )
-        except Exception as e:
-            print(f"[api/live-events] Snowflake error: {e!r}")
-            raise HTTPException(
-                status_code=503,
-                detail="Failed to load live events from Snowflake",
-            ) from e
-        events = [LiveEventItem.model_validate(row) for row in raw]
+        _ = minutes
+        buf: Deque[dict[str, Any]] = app.state.live_event_buffer
+        tail = list(reversed(buf))[:limit]
+        events = [LiveEventItem.model_validate(row) for row in tail]
         return LiveEventsResponse(events=events)
 
     @app.post("/process-frame", response_model=ProcessFrameResponse)
@@ -286,9 +353,12 @@ def create_app(
                 alert=None,
             )
 
+        prev = app.state.prev_sent
         alert = app.state.alert_engine.check(obs)
+        confirmed_fall = _is_confirmed_fall(obs, alert)
+
         thumb_b64: Optional[str] = None
-        if _should_persist_thumbnail(obs, alert):
+        if _should_persist_thumbnail(obs, alert, confirmed_fall=confirmed_fall):
             thumb_b64 = _encode_frame_thumbnail_bgr(frame)
         obs_to_store = (
             obs.model_copy(update={"frame_thumb_base64": thumb_b64})
@@ -296,16 +366,73 @@ def create_app(
             else obs
         )
 
+        records: List[Dict[str, Any]] = collect_transition_events(prev, obs)
+        if confirmed_fall:
+            records.append(
+                {
+                    "dedupe_key": DEDUPE_FALLEN,
+                    "event_type": "fallen",
+                    "headline": alert.quick_message or "Possible fall detected",
+                }
+            )
+
+        if confirmed_fall:
+            app.state.fall_attention_latched = True
+        if obs.pose in (PoseType.STANDING, PoseType.WALKING, PoseType.SITTING):
+            app.state.fall_attention_latched = False
+
+        min_fall_conf = _fall_min_pose_confidence()
+        fallen_attention = (
+            app.state.fall_attention_latched
+            and obs.pose == PoseType.LYING
+            and obs.pose_confidence >= min_fall_conf
+        )
+
+        buf: Deque[dict[str, Any]] = app.state.live_event_buffer
+        obs_iso = _observed_at_iso(obs)
+        for rec in records:
+            want_thumb = thumb_b64 and rec["dedupe_key"] in _LIVE_EVENT_THUMB_KEYS
+            buf.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "dedupe_key": rec["dedupe_key"],
+                    "event_type": rec["event_type"],
+                    "headline": rec["headline"],
+                    "observed_at": obs_iso,
+                    "display_name": obs.primary_display_name,
+                    "frame_thumb_base64": thumb_b64 if want_thumb else None,
+                    "summary": None,
+                    "meal_kind": None,
+                }
+            )
+
+        pose_val = obs.pose.value if hasattr(obs.pose, "value") else str(obs.pose)
+        act_val = obs.activity.value if hasattr(obs.activity, "value") else str(obs.activity)
+        app.state.last_primary_snapshot = {
+            "pose": pose_val,
+            "display_name": obs.primary_display_name,
+            "observed_at": obs_iso,
+            "session_id": obs.session_id,
+            "activity": act_val,
+            "fallen_attention": fallen_attention,
+        }
+
         app.state.prev_sent = obs
         app.state.snowflake.add_observation(obs_to_store)
         await app.state.ws_manager.broadcast_observation(obs)
 
         alert_json: Optional[dict[str, Any]] = None
         if alert is not None:
-            app.state.snowflake.add_alert(alert)
-            app.state.ws_manager.register_alert(alert)
-            await app.state.ws_manager.broadcast_alert(alert)
-            alert_json = alert.model_dump(mode="json")
+            if alert.alert_type == "fall_detected":
+                if confirmed_fall:
+                    app.state.snowflake.add_alert(alert)
+                    app.state.ws_manager.register_alert(alert)
+                    await app.state.ws_manager.broadcast_alert(alert)
+                    alert_json = alert.model_dump(mode="json")
+            else:
+                app.state.ws_manager.register_alert(alert)
+                await app.state.ws_manager.broadcast_alert(alert)
+                alert_json = alert.model_dump(mode="json")
 
         app.state.snowflake.flush()
 

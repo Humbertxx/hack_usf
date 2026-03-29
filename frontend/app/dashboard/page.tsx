@@ -13,10 +13,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 
 const LIVE_EVENTS_TZ = "America/New_York";
-const POLL_MS = 120_000;
+const LIVE_EVENTS_POLL_MS = 3_000;
+const PRIMARY_STATE_POLL_MS = 1_000;
 
 type LiveEventItem = {
   id: string | null;
+  dedupe_key?: string | null;
   event_type: string | null;
   headline: string | null;
   summary: string | null;
@@ -32,6 +34,52 @@ type LiveEventsPayload = {
   detail?: string;
   error?: string;
 };
+
+type PrimaryStatePayload = {
+  present?: boolean;
+  timezone?: string;
+  pose?: string | null;
+  display_name?: string | null;
+  observed_at?: string | null;
+  session_id?: string | null;
+  activity?: string | null;
+  fallen_attention?: boolean;
+  detail?: string;
+  error?: string;
+};
+
+function collapseConsecutiveDedupeKeys(events: LiveEventItem[]): LiveEventItem[] {
+  const out: LiveEventItem[] = [];
+  for (const ev of events) {
+    const key = ev.dedupe_key ?? ev.event_type ?? ev.id ?? "";
+    const last = out[out.length - 1];
+    const lastKey = last
+      ? (last.dedupe_key ?? last.event_type ?? last.id ?? "")
+      : null;
+    if (lastKey !== null && key !== "" && key === lastKey) continue;
+    out.push(ev);
+  }
+  return out;
+}
+
+function postureHeadline(
+  pose: string | null | undefined,
+  fallenAttention: boolean | undefined,
+) {
+  if (fallenAttention) return "Fallen / on floor";
+  switch (pose) {
+    case "sitting":
+      return "Sitting";
+    case "standing":
+      return "Standing";
+    case "walking":
+      return "Walking";
+    case "lying":
+      return "Lying down";
+    default:
+      return "Unknown";
+  }
+}
 
 function formatEventTimes(iso: string | null, tz: string) {
   if (!iso) {
@@ -106,6 +154,10 @@ function DashboardInner() {
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [primaryState, setPrimaryState] = useState<PrimaryStatePayload | null>(
+    null,
+  );
+  const [primaryError, setPrimaryError] = useState<string | null>(null);
 
   const values: basicstatus[] = [
     { type: "Active Hours", val: "8.5" },
@@ -141,11 +193,42 @@ function DashboardInner() {
     }
   }, []);
 
+  const fetchPrimaryState = useCallback(async () => {
+    try {
+      const r = await fetch("/api/primary-state", { cache: "no-store" });
+      const data: PrimaryStatePayload = await r.json();
+      if (!r.ok) {
+        const msg =
+          typeof data.detail === "string"
+            ? data.detail
+            : data.error ?? `HTTP ${r.status}`;
+        setPrimaryError(msg);
+        return;
+      }
+      setPrimaryError(null);
+      setPrimaryState(data);
+    } catch {
+      setPrimaryError("Could not load current posture");
+    }
+  }, []);
+
   useEffect(() => {
     void fetchLiveEvents();
-    const id = window.setInterval(() => void fetchLiveEvents(), POLL_MS);
+    const id = window.setInterval(
+      () => void fetchLiveEvents(),
+      LIVE_EVENTS_POLL_MS,
+    );
     return () => window.clearInterval(id);
   }, [fetchLiveEvents]);
+
+  useEffect(() => {
+    void fetchPrimaryState();
+    const id = window.setInterval(
+      () => void fetchPrimaryState(),
+      PRIMARY_STATE_POLL_MS,
+    );
+    return () => window.clearInterval(id);
+  }, [fetchPrimaryState]);
 
   const syncLabel = lastSyncedAt
     ? new Intl.DateTimeFormat("en-US", {
@@ -197,11 +280,63 @@ function DashboardInner() {
         </div>
       </section>
 
+      <section aria-labelledby="presence-heading" className="space-y-4">
+        <SectionHeader
+          id="presence-heading"
+          title="Right now"
+          description={`Updates every 1 sec · ${eventsTz.replace("_", " ")}`}
+        />
+        {primaryError ? (
+          <Card
+            hover={false}
+            className="border-amber-200/90 bg-[var(--warning-bg)] text-[var(--warning-text)] ring-amber-200/50"
+          >
+            <p className="text-sm leading-relaxed">{primaryError}</p>
+          </Card>
+        ) : (
+          <Card
+            hover={false}
+            className={`flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between ${
+              primaryState?.fallen_attention
+                ? "border-red-200/90 bg-red-50/80 ring-red-200/60"
+                : ""
+            }`}
+          >
+            <div>
+              <p className="text-section-label text-[0.65rem] uppercase tracking-wide text-neutral-500">
+                Primary person
+              </p>
+              <p className="mt-1 text-2xl font-semibold tracking-tight text-neutral-900">
+                {postureHeadline(
+                  primaryState?.pose,
+                  primaryState?.fallen_attention,
+                )}
+              </p>
+              {primaryState?.display_name ? (
+                <p className="mt-1 text-sm text-neutral-600">
+                  {primaryState.display_name}
+                  {primaryState.activity &&
+                  primaryState.activity !== "idle" &&
+                  primaryState.activity !== "unknown"
+                    ? ` · ${primaryState.activity.replace(/_/g, " ")}`
+                    : ""}
+                </p>
+              ) : null}
+            </div>
+            {!primaryState?.present ? (
+              <p className="text-sm text-neutral-500">
+                Waiting for the first saved frame from the CV service…
+              </p>
+            ) : null}
+          </Card>
+        )}
+      </section>
+
       <section aria-labelledby="live-heading" className="space-y-4">
         <SectionHeader
           id="live-heading"
           title="Live Updates"
-          description={`Refreshes every 2 min · ${eventsTz.replace("_", " ")}`}
+          description={`Transitions & alerts · every 3 sec · ${eventsTz.replace("_", " ")}`}
         />
 
         {eventsError ? (
@@ -225,13 +360,13 @@ function DashboardInner() {
         ) : liveEvents.length === 0 && !eventsError ? (
           <Card hover={false} className="text-center">
             <p className="text-sm leading-relaxed text-neutral-600">
-              No recent events in the last 30 minutes. Events appear after the
-              Snowflake task processes eating and fall alerts.
+              No transitions yet. Eating, drinking water, and fall events from the
+              CV service will appear here.
             </p>
           </Card>
         ) : (
           <div className="stagger-children flex flex-col gap-4">
-            {liveEvents.map((ev, index) => {
+            {collapseConsecutiveDedupeKeys(liveEvents).map((ev, index) => {
               const title =
                 ev.headline?.trim() ||
                 ev.event_type?.replace(/_/g, " ") ||

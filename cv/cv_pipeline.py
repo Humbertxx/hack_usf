@@ -170,7 +170,13 @@ def _infer_pose_type_from_landmarks(
             pose = PoseType.LYING
         elif dy < -0.055:  # shoulders above hips: upright
             # Seated (webcam): bent knees → small vertical hip–knee gap vs standing
+            # Far from the camera or occluded legs: knees often missing / noisy; without
+            # a clear hip–knee signal, "upright + not clearly walking" should bias seated
+            # so we do not flash STANDING→WALKING while someone is still in a chair.
+            knee_unreliable = knee_vis < 0.4 or hip_knee_y is None
             if hip_knee_y is not None and hip_knee_y < 0.15:
+                pose = PoseType.SITTING
+            elif knee_unreliable and motion_level != MotionLevel.HIGH:
                 pose = PoseType.SITTING
             elif motion_level == MotionLevel.HIGH:
                 pose = PoseType.WALKING
