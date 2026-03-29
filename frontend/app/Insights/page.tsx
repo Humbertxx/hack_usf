@@ -1,10 +1,8 @@
 "use client";
 import InsightCard from "../components/InsightCard";
-import { useState } from 'react'
-
+import { useState } from "react";
 
 export default function Home() {
-
   const [grandma, setGrandma] = useState(true);
   const [grandpa, setGrandpa] = useState(false);
 
@@ -22,13 +20,17 @@ export default function Home() {
           </div>
 
           <div className="flex gap-0 w-[200px] h-[50px] rounded-2xl border-0 bg-gray-200 justify-center">
-            <button onClick={() => { setGrandma(!grandma);}} 
-            className={`hover:shadow w-[50%] h-full hover:scale-110 rounded-tl-2xl rounded-bl-2xl transition duration-100 ease-in ${grandma ? "bg-sky-200" : "bg-gray-200"}`}
+            <button
+              onClick={() => {
+                setGrandma(!grandma);
+              }}
+              className={`hover:shadow w-[50%] h-full hover:scale-110 rounded-tl-2xl rounded-bl-2xl transition duration-100 ease-in ${grandma ? "bg-sky-200" : "bg-gray-200"}`}
             >
               grandma
             </button>
 
-              <button onClick={() => {
+            <button
+              onClick={() => {
                 setGrandpa(!grandpa);
               }} 
               className={`hover:shadow w-[50%] h-full hover:scale-110 rounded-tr-2xl rounded-br-2xl transition duration-100 ease-in ${grandpa ? "bg-sky-200" : "bg-gray-200"}`}
@@ -36,23 +38,15 @@ export default function Home() {
                 grandpa
             </button>
           </div>
-
         </div>
-        {grandma && (
-        <div className="flex justify-start gap-5 w-[90%] md:w-[80%]">
+        <div className="flex flex-wrap justify-between items-center gap-5 w-[90%] md:w-[80%]">
           <InsightCard />
-        </div> )}
-
-        {grandpa && (
-        <div className="flex justify-start gap-5 w-[90%] md:w-[80%]">
-          <InsightCard />
-        </div> )}
+        </div> 
         
       </div>
     </>
   );
 }
-
 
 /*
             className={`w-[200px] h-[50px] rounded-lg transition duration-100 border-0 ease-in

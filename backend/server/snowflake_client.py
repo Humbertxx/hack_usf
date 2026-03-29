@@ -7,6 +7,7 @@ from snowflake.connector.pandas_tools import write_pandas
 from snowflake.connector.constants import PARAMETER_PYTHON_CONNECTOR_QUERY_RESULT_FORMAT
 import pandas as pd
 from models import Observation, Alert
+from config import MAX_LIMIT
 
 # remember init in class is related to .env
 
@@ -135,7 +136,7 @@ class SnowflakeClient:
         finally:
             cursor.close()
     # fetch recent observations made for dashboard
-    def get_recent_observations(self, limit: int = 50) -> List[dict]:
+    def get_recent_observations(self, limit: int = MAX_LIMIT) -> List[dict]:
         cursor = self.conn.cursor()
         try:
             cursor.execute(f"""
