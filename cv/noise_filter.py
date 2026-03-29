@@ -15,12 +15,17 @@ def should_send(
     *,
     in_concern_window: bool = False,
 <<<<<<< HEAD
+<<<<<<< HEAD
     min_pose_confidence: float = 0.35,  # Lowered for upper-body-only fallback detection
     min_activity_confidence: float = 0.45,  # Lowered to allow context-based activity inference
 =======
     min_pose_confidence: float = 0.5,
     min_activity_confidence: float = 0.55,
 >>>>>>> 2e0f0e3 (Reduced strictness of frame quality calc)
+=======
+    min_pose_confidence: float = 0.35,  # Lowered for upper-body-only fallback detection
+    min_activity_confidence: float = 0.45,  # Lowered to allow context-based activity inference
+>>>>>>> 826e502 (Adjusted thresholds and fixed inference quality)
     min_frame_quality: float = 0.2,
 ) -> bool:
     """
