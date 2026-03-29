@@ -263,16 +263,24 @@ def _extract_landmarks_rgb(
 
 
 def _yolo_model_name() -> str:
-    return os.environ.get("CV_YOLO_MODEL", "yolov8l.pt")
+    # YOLOv8 model variants (increasing accuracy & VRAM):
+    #   yolov8n.pt (nano)   - ~3M params, fastest
+    #   yolov8s.pt (small)  - ~11M params
+    #   yolov8m.pt (medium) - ~26M params
+    #   yolov8l.pt (large)  - ~44M params
+    #   yolov8x.pt (xlarge) - ~68M params, highest accuracy
+    return os.environ.get("CV_YOLO_MODEL", "yolov8x.pt")
 
 
 def _yolo_imgsz() -> int:
-    raw = os.environ.get("CV_YOLO_IMGSZ", "960")
+    # Higher imgsz = more detail, better small object detection
+    # 5090 can easily handle 1280 or higher
+    raw = os.environ.get("CV_YOLO_IMGSZ", "1280")
     try:
         v = int(raw)
-        return max(320, min(1280, v))
+        return max(320, min(1920, v))
     except ValueError:
-        return 960
+        return 1280
 
 
 def _normalize_yolo_label(label: str) -> str:

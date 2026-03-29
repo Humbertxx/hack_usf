@@ -14,9 +14,9 @@ import httpx
 import numpy as np
 
 # Defaults per WORKSTREAM_A_CV_SETUP.md Phase 4.1
-RESOLUTION = (1280, 720)
+RESOLUTION = (1920, 1080)
 CAPTURE_INTERVAL = 5  # seconds
-JPEG_QUALITY = 85
+JPEG_QUALITY = 95
 SERVER_URL = "http://localhost:8080/process-frame"
 
 _DEFAULT_MAX_QUEUE = 64
