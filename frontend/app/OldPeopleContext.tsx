@@ -6,6 +6,8 @@ import { useContext, createContext, useState, ReactNode } from "react";
 interface OldPeopleContextType {
   oldPeople: number;
   setOldPeople: (value: number) => void;
+  Navbar: boolean;
+  setNavbar: (value: boolean) => void;
 }
 
 // 2. Pass the type to createContext and provide 'undefined' as the default argument
@@ -30,9 +32,11 @@ export const useOldPeopleContext = () => {
 
 export const OldPeopleProvider = ({ children }: ProviderProps) => {
   const [oldPeople, setOldPeople] = useState<number>(0);
-
+  const [Navbar, setNavbar] = useState<boolean>(false);
   return (
-    <OldPeopleContext.Provider value={{ oldPeople, setOldPeople }}>
+    <OldPeopleContext.Provider
+      value={{ oldPeople, setOldPeople, Navbar, setNavbar }}
+    >
       {children}
     </OldPeopleContext.Provider>
   );

@@ -3,14 +3,18 @@
 import Image from "next/image";
 import { useContext, useRef, useState, useEffect } from "react";
 import { OldPeopleContext, useOldPeopleContext } from "./OldPeopleContext";
+import router from "next/dist/shared/lib/router/router";
+import { useRouter } from "next/dist/client/components/navigation";
 
 export default function Home() {
-  const { oldPeople, setOldPeople } = useOldPeopleContext();
+  const router = useRouter();
+  const { oldPeople, setOldPeople, Navbar, setNavbar } = useOldPeopleContext();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // state to track camera state
+  // state to track camera
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [enroll, setenroll] = useState(false);
 
   // webcame to start/stop webcame
   useEffect(() => {
@@ -68,6 +72,14 @@ export default function Home() {
 
         const result = await res.json();
         console.log("Enrollment Success:", result);
+
+        if (result.success) {
+          alert(`${subjectId} enrolled successfully!`);
+          if (!enroll) {
+            router.push("/dashboard");
+            setNavbar(true);
+          }
+        }
 
         // camera close after capture
         // setIsCameraActive(false);
@@ -142,11 +154,13 @@ export default function Home() {
           )}
           {oldPeople === 1 && (
             <button
-              onClick={() =>
-                isCameraActive
-                  ? captureAndEnroll("grandma")
-                  : setIsCameraActive(true)
-              }
+              onClick={() => {
+                if (isCameraActive) {
+                  captureAndEnroll("grandma");
+                } else {
+                  setIsCameraActive(true);
+                }
+              }}
               className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300"
             >
               <p className="font-bold text-lg">
@@ -177,13 +191,27 @@ export default function Home() {
           {oldPeople === 3 && (
             <>
               <button
-                onClick={() => captureAndEnroll("grandma")}
+                onClick={() => {
+                  captureAndEnroll("grandma");
+                  if (!enroll) {
+                    setenroll(true);
+                  } else {
+                    setenroll(false);
+                  }
+                }}
                 className={`bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 ${isCameraActive ? "" : "hidden"}`}
               >
                 <p className="font-bold text-lg">Capture Grandma</p>
               </button>
               <button
-                onClick={() => captureAndEnroll("grandpa")}
+                onClick={() => {
+                  captureAndEnroll("grandpa");
+                  if (!enroll) {
+                    setenroll(true);
+                  } else {
+                    setenroll(false);
+                  }
+                }}
                 className={`bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 ${isCameraActive ? "" : "hidden"}`}
               >
                 <p className="font-bold text-lg">Capture Grandpa</p>
