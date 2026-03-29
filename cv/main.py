@@ -35,6 +35,8 @@ from cv.transition_events import (
     DEDUPE_DRINKING,
     DEDUPE_EATING,
     DEDUPE_FALLEN,
+    DEDUPE_SIT_TO_WALK,
+    DEDUPE_WALK_TO_SIT,
     collect_transition_events,
 )
 from cv.websocket_manager import WebSocketManager
@@ -51,6 +53,86 @@ def _min_identity_confidence() -> float:
         return float(raw)
     except ValueError:
         return 0.58
+
+
+def _locomotion_min_pose_confidence() -> float:
+    raw = os.environ.get("CV_LOCOMOTION_MIN_POSE_CONFIDENCE", "0.55").strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.55
+
+
+def _locomotion_walk_confirm_frames() -> int:
+    raw = os.environ.get("CV_LOCOMOTION_WALK_CONFIRM_FRAMES", "2").strip()
+    try:
+        return max(1, min(int(raw), 5))
+    except ValueError:
+        return 2
+
+
+def _filter_locomotion_with_debounce(
+    raw: List[Dict[str, Any]],
+    prev: Optional[Observation],
+    curr: Observation,
+    app_state: Any,
+) -> List[Dict[str, Any]]:
+    """
+    Drop weak sit↔walk transitions and require N consecutive high-confidence
+    walking/sitting frames before emitting (reduces MediaPipe noise at distance).
+    """
+    loc_keys = frozenset({DEDUPE_SIT_TO_WALK, DEDUPE_WALK_TO_SIT})
+    out: List[Dict[str, Any]] = [e for e in raw if e["dedupe_key"] not in loc_keys]
+    loc_raw = [e for e in raw if e["dedupe_key"] in loc_keys]
+    loc_min = _locomotion_min_pose_confidence()
+    n_confirm = _locomotion_walk_confirm_frames()
+
+    if curr.pose == PoseType.SITTING:
+        app_state.pending_sit_to_walk_emit = False
+    if curr.pose == PoseType.WALKING:
+        app_state.pending_walk_to_sit_emit = False
+
+    for e in loc_raw:
+        if e["dedupe_key"] == DEDUPE_SIT_TO_WALK:
+            if prev is None or prev.pose_confidence < loc_min or curr.pose_confidence < loc_min:
+                continue
+            if app_state.locomotion_walk_streak >= n_confirm:
+                out.append(e)
+                app_state.pending_sit_to_walk_emit = False
+            else:
+                app_state.pending_sit_to_walk_emit = True
+        elif e["dedupe_key"] == DEDUPE_WALK_TO_SIT:
+            if prev is None or prev.pose_confidence < loc_min or curr.pose_confidence < loc_min:
+                continue
+            if app_state.locomotion_sit_streak >= n_confirm:
+                out.append(e)
+                app_state.pending_walk_to_sit_emit = False
+            else:
+                app_state.pending_walk_to_sit_emit = True
+
+    if app_state.pending_sit_to_walk_emit and app_state.locomotion_walk_streak >= n_confirm:
+        if not any(x["dedupe_key"] == DEDUPE_SIT_TO_WALK for x in loc_raw):
+            out.append(
+                {
+                    "dedupe_key": DEDUPE_SIT_TO_WALK,
+                    "event_type": "locomotion",
+                    "headline": "Started walking",
+                }
+            )
+        app_state.pending_sit_to_walk_emit = False
+
+    if app_state.pending_walk_to_sit_emit and app_state.locomotion_sit_streak >= n_confirm:
+        if not any(x["dedupe_key"] == DEDUPE_WALK_TO_SIT for x in loc_raw):
+            out.append(
+                {
+                    "dedupe_key": DEDUPE_WALK_TO_SIT,
+                    "event_type": "locomotion",
+                    "headline": "Sat down",
+                }
+            )
+        app_state.pending_walk_to_sit_emit = False
+
+    return out
 
 
 def _fall_min_pose_confidence() -> float:
@@ -285,6 +367,10 @@ def create_app(
     app.state.live_event_buffer = deque(maxlen=LIVE_EVENT_BUFFER_MAX)
     app.state.last_primary_snapshot: Optional[Dict[str, Any]] = None
     app.state.fall_attention_latched = False
+    app.state.locomotion_walk_streak = 0
+    app.state.locomotion_sit_streak = 0
+    app.state.pending_sit_to_walk_emit = False
+    app.state.pending_walk_to_sit_emit = False
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -362,7 +448,23 @@ def create_app(
             else obs
         )
 
-        records: List[Dict[str, Any]] = collect_transition_events(prev, obs)
+        loc_min_pb = _locomotion_min_pose_confidence()
+        if obs.pose == PoseType.WALKING and obs.pose_confidence >= loc_min_pb:
+            app.state.locomotion_walk_streak += 1
+        else:
+            app.state.locomotion_walk_streak = 0
+        if obs.pose == PoseType.SITTING and obs.pose_confidence >= loc_min_pb:
+            app.state.locomotion_sit_streak += 1
+        else:
+            app.state.locomotion_sit_streak = 0
+
+        raw_transitions: List[Dict[str, Any]] = collect_transition_events(prev, obs)
+        records: List[Dict[str, Any]] = _filter_locomotion_with_debounce(
+            raw_transitions,
+            prev,
+            obs,
+            app.state,
+        )
         if confirmed_fall:
             records.append(
                 {

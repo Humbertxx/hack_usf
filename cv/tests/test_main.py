@@ -147,12 +147,18 @@ def test_live_events_sit_to_walk_after_frames() -> None:
     )
     o1 = Observation(id=str(uuid.uuid4()), pose=PoseType.SITTING, **base_kw)
     o2 = Observation(id=str(uuid.uuid4()), pose=PoseType.WALKING, **base_kw)
+    o3 = Observation(
+        id=str(uuid.uuid4()),
+        pose=PoseType.WALKING,
+        **{**base_kw, "objects_detected": ["chair"]},
+    )
     app = create_app(
-        pipeline_factory=lambda: SeqPipeline([o1, o2]),
+        pipeline_factory=lambda: SeqPipeline([o1, o2, o3]),
         snowflake=_NoSnowflake(),
     )
     with TestClient(app) as client:
         files = {"file": ("f.jpg", _jpeg_bytes(), "image/jpeg")}
+        assert client.post("/process-frame?session_id=s1", files=files).status_code == 200
         assert client.post("/process-frame?session_id=s1", files=files).status_code == 200
         assert client.post("/process-frame?session_id=s1", files=files).status_code == 200
         r = client.get("/api/live-events?limit=10")
