@@ -28,8 +28,9 @@ from cv.reid_embeddings import ReIDEmbedder
 from cv.snowflake_client import create_snowflake_client
 from cv.websocket_manager import WebSocketManager
 
-# Minimum identity confidence required to send enrolled person data to Snowflake
-MIN_IDENTITY_CONFIDENCE = 0.7
+# Must align with ReID match threshold in cv_pipeline._enrich_person_detection (0.65).
+# If this is higher than that threshold, frames can be "MATCHED" in logs but never sent to Snowflake.
+MIN_IDENTITY_CONFIDENCE = 0.65
 
 
 def should_send_to_snowflake(

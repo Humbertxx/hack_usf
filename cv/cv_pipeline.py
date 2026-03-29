@@ -262,19 +262,107 @@ def _extract_landmarks_rgb(
     return None, None, MotionLevel.NORMAL
 
 
+def _yolo_model_name() -> str:
+    return os.environ.get("CV_YOLO_MODEL", "yolov8l.pt")
+
+
+def _yolo_imgsz() -> int:
+    raw = os.environ.get("CV_YOLO_IMGSZ", "960")
+    try:
+        v = int(raw)
+        return max(320, min(1280, v))
+    except ValueError:
+        return 960
+
+
+def _normalize_yolo_label(label: str) -> str:
+    """Lowercase and collapse whitespace for comparison with COCO-style names."""
+    return " ".join(label.strip().lower().split())
+
+
+# Default COCO-80 allowlist after removing:
+# - All vehicles (bicycle, car, motorcycle, airplane, bus, train, truck, boat)
+# - Travel / mobility gear (skis, snowboard, skateboard, surfboard, suitcase)
+# - Outdoor-only street & play (traffic light, fire hydrant, stop sign, parking meter, bench, kite, frisbee)
+# - Animals except cat and dog
+# - Extra indoor-clutter / non-priority: backpack, baseball bat/glove, bed, clock, donut, hair drier,
+#   handbag, hot dog, keyboard, laptop, mouse, oven, sports ball, teddy bear, tennis racket,
+#   tie, toilet, toothbrush, umbrella, vase
+#   (microwave kept for cooking activity cues)
+# Person is always kept in the detection loop (also in this set for activity labels).
+_YOLO_DEFAULT_ALLOWED_LABELS: frozenset[str] = frozenset(
+    {
+        "apple",
+        "banana",
+        "book",
+        "bottle",
+        "bowl",
+        "broccoli",
+        "cake",
+        "carrot",
+        "cat",
+        "cell phone",
+        "chair",
+        "couch",
+        "cup",
+        "dining table",
+        "dog",
+        "fork",
+        "knife",
+        "microwave",
+        "orange",
+        "person",
+        "pizza",
+        "potted plant",
+        "refrigerator",
+        "remote",
+        "sandwich",
+        "scissors",
+        "sink",
+        "spoon",
+        "toaster",
+        "tv",
+        "wine glass",
+    }
+)
+
+
+def _yolo_allowed_labels() -> frozenset[str]:
+    """
+    Comma-separated override via CV_YOLO_ALLOWED_LABELS (normalized like COCO names).
+    If unset, uses _YOLO_DEFAULT_ALLOWED_LABELS.
+    """
+    raw = os.environ.get("CV_YOLO_ALLOWED_LABELS", "").strip()
+    if not raw:
+        return _YOLO_DEFAULT_ALLOWED_LABELS
+    parts = [_normalize_yolo_label(p) for p in raw.split(",") if p.strip()]
+    return frozenset(parts)
+
+
+def _yolo_label_kept(label: str, cls_id: int, allowed: frozenset[str]) -> bool:
+    """Standard COCO: class 0 is person; always keep person for ReID."""
+    key = _normalize_yolo_label(label)
+    if cls_id == 0 or key == "person":
+        return True
+    return key in allowed
+
+
 class CVPipeline:
     VISITOR_BUFFER_SIZE = 50
     VISITOR_TTL_SECONDS = 300  # 5 minutes
 
     def __init__(
         self,
-        yolo_model_name: str = "yolov8n.pt",
+        yolo_model_name: Optional[str] = None,
         *,
         pose_backend: Optional[str] = None,
         identity_store: Optional[Any] = None,
     ) -> None:
         self._device = _device()
-        self.yolo_model = YOLO(yolo_model_name)
+        name = yolo_model_name if yolo_model_name is not None else _yolo_model_name()
+        self.yolo_model = YOLO(name)
+        self._yolo_imgsz = _yolo_imgsz()
+        self._yolo_allowed_labels = _yolo_allowed_labels()
         pref = pose_backend if pose_backend is not None else os.environ.get("CV_POSE_BACKEND", "auto")
         self._pose = _build_pose_handles(pref)
         self._prev_kp: Optional[np.ndarray] = None
@@ -286,10 +374,19 @@ class CVPipeline:
 
         if identity_store is not None:
             from cv.reid_embeddings import ReIDEmbedder
+
             self._reid_embedder = ReIDEmbedder()
-            print(f"[CVPipeline] ReID enabled. Identity store has {identity_store.count} enrolled subjects.")
+            print(
+                f"[CVPipeline] YOLO={name} imgsz={self._yolo_imgsz} | "
+                f"ReID={self._reid_embedder.model_name} | "
+                f"subjects={identity_store.count} | "
+                f"yolo_allowed={len(self._yolo_allowed_labels)}"
+            )
         else:
-            print("[CVPipeline] WARNING: No identity store provided - ReID matching disabled!")
+            print(
+                f"[CVPipeline] YOLO={name} imgsz={self._yolo_imgsz} | "
+                f"ReID disabled | yolo_allowed={len(self._yolo_allowed_labels)}"
+            )
 
     def close(self) -> None:
         if self._pose.backend == "legacy" and self._pose.legacy is not None:
@@ -460,7 +557,7 @@ class CVPipeline:
         results = self.yolo_model.predict(
             source=frame,
             device=self._device,
-            imgsz=640,
+            imgsz=self._yolo_imgsz,
             verbose=False,
         )
         raw_labels: List[str] = []
@@ -476,8 +573,11 @@ class CVPipeline:
                     if conf < 0.35:
                         continue
                     name = str(names.get(int(cls), str(int(cls))))
+                    cls_i = int(cls)
+                    if not _yolo_label_kept(name, cls_i, self._yolo_allowed_labels):
+                        continue
                     raw_labels.append(name)
-                    is_person = int(cls) == 0
+                    is_person = cls_i == 0
                     if is_person:
                         person_detected = True
                     if i < len(boxes_xyxy):
