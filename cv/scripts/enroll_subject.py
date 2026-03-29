@@ -25,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -213,7 +214,7 @@ def _detect_person_in_image(image_bytes: bytes) -> bool:
     if frame is None:
         return False
 
-    model = YOLO("yolov8n.pt")
+    model = YOLO(os.environ.get("CV_YOLO_MODEL", "yolov8l.pt"))
     results = model.predict(source=frame, verbose=False)
     
     if results and results[0].boxes is not None:

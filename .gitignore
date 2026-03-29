@@ -10,6 +10,11 @@ __pycache__/
 .pytest_cache/
 cv/.pytest_cache/
 cv/.cache/
+# Local enrollment / capture JPEGs (regenerated; not stable artifacts)
+cv/data/*.jpg
+cv/data/*.jpeg
+cv/data/*.JPG
+cv/data/*.JPEG
 *.pt
 Ultralytics/
 # Logs
