@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parents[1]))
+sys.path.append(str(Path(__file__).resolve().parents[1])) # REMEMBER TO DELETE !!
 
 from server.snowflake_client import SnowflakeClient
 from models import Observation, Alert, PoseType, ActivityType, MotionLevel, Severity

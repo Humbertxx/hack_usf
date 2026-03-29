@@ -6,21 +6,19 @@ import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 from snowflake.connector.constants import PARAMETER_PYTHON_CONNECTOR_QUERY_RESULT_FORMAT
 import pandas as pd
+from models import Observation, Alert
 
-try:
-    from models import Observation, Alert
-except ModuleNotFoundError:
-    from backend.models import Observation, Alert
+# remember init in class is related to .env
 
-class SnowflakeClient:
+class SnowflakeClient: 
     def __init__(self):
         self.conn = snowflake.connector.connect(
             account=os.getenv('SNOWFLAKE_ACCOUNT'),
             user=os.getenv('SNOWFLAKE_USER'),
             password=os.getenv('SNOWFLAKE_PASSWORD'),
-            warehouse='COMPUTE_WH',
-            database='GRANDMA_MONITOR',
-            schema='PUBLIC',
+            warehouse=os.getenv('SNOWFLAKE_WAREHOUSE'),
+            database=os.getenv('SNOWFLAKE_DATABASE'),
+            schema=os.getenv('SNOWFLAKE_SCHEMA'),
             session_parameters={
                 "PYTHON_CONNECTOR_QUERY_RESULT_FORMAT": "JSON"
             }

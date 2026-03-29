@@ -2,6 +2,7 @@
 # RunPod (RTX 5090 / Blackwell): install CUDA 12.8 wheels FIRST (from repo root):
 #   pip install --upgrade pip
 #   pip install "torch>=2.8.0" "torchvision>=0.23.0" --index-url https://download.pytorch.org/whl/cu128
+#   (torchvision 0.22.x on PyPI requires torch 2.7.x; torchvision 0.23.x is the 2.8 line — keep them in one install.)
 #   pip install -r cv/requirements.txt
 # Dev + tests: pip install -r cv/requirements-dev.txt && cd cv && python -m pytest
 #
@@ -9,8 +10,19 @@
 #
 # MediaPipe pose: set CV_POSE_BACKEND=auto|legacy|tasks|none (default auto). RunPod/Linux usually supports
 # tasks or legacy; some macOS/headless setups require `none` or Linux+EGL. Lite model caches under cv/.cache/
+# Headless containers: MediaPipe *tasks* may need OpenGL ES (`libGLESv2.so.2`). If startup fails, try:
+#   apt-get update && apt-get install -y libgles2-mesa
+# or rely on `auto` falling back to pose disabled when tasks cannot load (YOLO still runs).
+#
+# Accuracy tuning (GPU with headroom): defaults are yolov8l + imgsz 960 + osnet_x1_0. Override:
+#   CV_YOLO_MODEL=yolov8x.pt   # n/s/m/l/x — larger = slower, often more accurate
+#   CV_YOLO_IMGSZ=960           # 320–1280; higher helps small objects (FPS drops)
+#   CV_REID_MODEL=osnet_x1_0    # e.g. osnet_ain_x1_0 — changing ReID requires re-enrolling subjects
+#   CV_YOLO_ALLOWED_LABELS=person,cup,tv,...  # optional; replaces default indoor-focused COCO allowlist
 
 fastapi>=0.115.0
+python-multipart>=0.0.9
+python-dotenv>=1.0.0
 uvicorn[standard]>=0.32.0
 ultralytics>=8.3.0
 mediapipe>=0.10.14
@@ -18,3 +30,17 @@ opencv-python-headless>=4.10.0
 httpx>=0.27.0
 pydantic>=2.0
 numpy>=1.26.0
+Cython>=3.0.0
+wheel
+setuptools>=61.0
+gdown
+tensorboard
+torchreid
+# torchreid: Install separately AFTER other deps due to build dependencies:
+#   pip install --no-build-isolation git+https://github.com/KaiyangZhou/deep-person-reid.git
+
+# Snowflake: production CV server (cv.main) uses SnowflakeClient by default, so the GPU pod
+# needs these packages or startup/import will fail when flushing observations. Tests can still
+# inject MockSnowflakeClient via create_app(snowflake=...).
+snowflake-connector-python>=3.6.0
+pandas>=2.0.0

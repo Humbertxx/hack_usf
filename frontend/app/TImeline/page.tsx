@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 
 export default function Home() {
   interface basicstatus {
@@ -21,6 +21,11 @@ export default function Home() {
   const [time, settime] = useState(0);
   const [grandma, setgrandma] = useState(true);
   const [grandpa, setgrandpa] = useState(false);
+  const [line, setline] = useState(0);
+
+  useEffect(() => {
+    setline(values.length - 1);
+  }, [values]);
 
   return (
     <>
@@ -75,7 +80,12 @@ export default function Home() {
             >
               <div className="flex items-center justify-start flex-col">
                 <div className="rounded-full bg-green-500 h-12 w-12" />
-                <div className="absolute w-[2px] bg-green-500 h-[100px]" />
+                <div
+                  className={
+                    "absolute w-[2px] bg-green-500 h-[100px] " +
+                    (index === line ? "hidden" : "")
+                  }
+                />
               </div>
               <div className="shadow hover:shadow-xl transition duration-100 ease-in p-3 flex flex-col items-start justify-start bg-sky-50 w-full h-[75px] rounded-2xl">
                 <div className="w-full flex justify-between">
