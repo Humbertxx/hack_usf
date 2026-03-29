@@ -2,6 +2,7 @@
 
 import { Card } from "@/app/components/Card";
 import { SectionHeader } from "@/app/components/SectionHeader";
+import { isHackUsfDemoSession } from "@/lib/demo-session";
 import { useEffect, useState } from "react";
 
 export default function Home() {
@@ -20,8 +21,19 @@ export default function Home() {
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDemoMode, setIsDemoMode] = useState(false);
 
   useEffect(() => {
+    setIsDemoMode(isHackUsfDemoSession());
+  }, []);
+
+  useEffect(() => {
+    if (!isDemoMode) {
+      setItems([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     const controller = new AbortController();
     const load = async () => {
       setLoading(true);
@@ -52,7 +64,7 @@ export default function Home() {
     };
     void load();
     return () => controller.abort();
-  }, [person, range]);
+  }, [person, range, isDemoMode]);
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-8 px-6 py-10">
@@ -125,7 +137,11 @@ export default function Home() {
         </Card>
       </div>
 
-      {loading && items.length === 0 ? (
+      {!isDemoMode ? (
+        <Card hover={false} className="text-neutral-600">
+          Timeline is unavailable outside demo mode. Open /demo to view mock data.
+        </Card>
+      ) : loading && items.length === 0 ? (
         <Card hover={false} className="text-neutral-600">
           Loading timeline...
         </Card>
