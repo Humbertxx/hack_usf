@@ -1,7 +1,8 @@
 "use client";
 
-import Image from "next/image";
-import { use, useEffect, useState } from "react";
+import { Card } from "@/app/components/Card";
+import { SectionHeader } from "@/app/components/SectionHeader";
+import { useEffect, useState } from "react";
 
 export default function Home() {
   interface basicstatus {
@@ -17,7 +18,6 @@ export default function Home() {
     { type: "Cruisin", text: "Granny has a nice car", time: "6:50am" },
   ];
 
-  //0 for today, 1 for yesterday, 2 for last week
   const [time, settime] = useState(0);
   const [grandma, setgrandma] = useState(true);
   const [grandpa, setgrandpa] = useState(false);
@@ -28,76 +28,112 @@ export default function Home() {
   }, [values]);
 
   return (
-    <>
-      <div className="p-10 w-full h-full flex flex-col gap-5 items-center justify-start">
-        <div className="flex flex-col gap-3 justify-center w-[90%] md:w-[80%]">
-          <p className="font-bold text-3xl">Activity Timeline</p>
-          <p className="font-thin text-gray-600 text-sm">
-            Here is whats happening with today!
-          </p>
-        </div>
-        <div className="flex items-center justify-between w-[90%] md:w-[80%]">
-          <div className="shadow flex justify-center items-center bg-sky-50 rounded-2xl w-[300px] h-[50px]">
-            <button
-              onClick={time === 0 ? () => settime(-1) : () => settime(0)}
-              className={`hover:shadow bg-sky-50 w-[34%] h-full rounded-l-2xl hover:scale-110 transition duration-100 ease-in ${time === 0 ? "bg-sky-200" : ""}`}
-            >
-              today
-            </button>
-            <button
-              onClick={time === 1 ? () => settime(-1) : () => settime(1)}
-              className={`hover:shadow bg-sky-50 w-[34%] h-full hover:scale-110 transition duration-100 ease-in ${time === 1 ? "bg-sky-200" : ""}`}
-            >
-              yesterday
-            </button>
-            <button
-              onClick={time === 2 ? () => settime(-1) : () => settime(2)}
-              className={`hover:shadow bg-sky-50 w-[34%] h-full rounded-r-2xl hover:scale-110 transition duration-100 ease-in ${time === 2 ? "bg-sky-200" : ""}`}
-            >
-              last week
-            </button>
-          </div>
-          <div className="shadow flex justify-center items-center bg-sky-50 rounded-2xl w-[300px] h-[50px]">
-            <button
-              onClick={() => setgrandma(!grandma)}
-              className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-l-2xl hover:scale-110 transition duration-100 ease-in ${grandma ? "bg-sky-200" : ""}`}
-            >
+    <div className="mx-auto w-full max-w-5xl space-y-8 px-6 py-10">
+      <SectionHeader
+        eyebrow="Day view"
+        title="Activity Timeline"
+        description="Here's what's happening today."
+      />
+
+      <div className="flex flex-col gap-4 lg:flex-row lg:justify-between">
+        <Card hover={false} padded={false} className="flex h-[52px] p-0">
+          <button
+            type="button"
+            onClick={time === 0 ? () => settime(-1) : () => settime(0)}
+            className={`flex-1 rounded-l-2xl px-3 text-sm font-medium transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600/40 ds-motion-hover ${
+              time === 0
+                ? "bg-[var(--surface-muted)] text-neutral-900"
+                : "hover:bg-sky-100/50"
+            }`}
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            onClick={time === 1 ? () => settime(-1) : () => settime(1)}
+            className={`flex-1 px-3 text-sm font-medium transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600/40 ds-motion-hover ${
+              time === 1
+                ? "bg-[var(--surface-muted)] text-neutral-900"
+                : "hover:bg-sky-100/50"
+            }`}
+          >
+            Yesterday
+          </button>
+          <button
+            type="button"
+            onClick={time === 2 ? () => settime(-1) : () => settime(2)}
+            className={`flex-1 rounded-r-2xl px-3 text-sm font-medium transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600/40 ds-motion-hover ${
+              time === 2
+                ? "bg-[var(--surface-muted)] text-neutral-900"
+                : "hover:bg-sky-100/50"
+            }`}
+          >
+            Last week
+          </button>
+        </Card>
+
+        <Card hover={false} padded={false} className="flex h-[52px] p-0">
+          <button
+            type="button"
+            onClick={() => setgrandma(!grandma)}
+            className={`flex-1 rounded-l-2xl px-4 text-sm font-medium transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600/40 ds-motion-hover ${
               grandma
-            </button>
-            <button
-              onClick={() => setgrandpa(!grandpa)}
-              className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-r-2xl hover:scale-110 transition duration-100 ease-in ${grandpa ? "bg-sky-200" : ""}`}
-            >
+                ? "bg-[var(--surface-muted)] text-neutral-900"
+                : "hover:bg-sky-100/50"
+            }`}
+          >
+            Grandma
+          </button>
+          <button
+            type="button"
+            onClick={() => setgrandpa(!grandpa)}
+            className={`flex-1 rounded-r-2xl px-4 text-sm font-medium transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600/40 ds-motion-hover ${
               grandpa
-            </button>
-          </div>
-        </div>
-        <div className="flex flex-col gap-5 flex-wrap items-center justify-between w-[90%] md:w-[80%]">
-          {values.map((item, index) => (
-            <div
-              key={index}
-              className="w-full flex items-center justify-start gap-5"
-            >
-              <div className="flex items-center justify-start flex-col">
-                <div className="rounded-full bg-green-500 h-12 w-12" />
-                <div
-                  className={
-                    "absolute w-[2px] bg-green-500 h-[100px] " +
-                    (index === line ? "hidden" : "")
-                  }
-                />
-              </div>
-              <div className="shadow hover:shadow-xl transition duration-100 ease-in p-3 flex flex-col items-start justify-start bg-sky-50 w-full h-[75px] rounded-2xl">
-                <div className="w-full flex justify-between">
-                  <p className="font-bold text-xl">{item.type}</p>
-                  <p className="light text-xs text-gray-600">{item.time}</p>
-                </div>
-                <p className="text-sm">{item.text}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+                ? "bg-[var(--surface-muted)] text-neutral-900"
+                : "hover:bg-sky-100/50"
+            }`}
+          >
+            Grandpa
+          </button>
+        </Card>
       </div>
-    </>
+
+      <ul className="relative flex flex-col gap-4">
+        {values.map((item, index) => (
+          <li key={item.time} className="flex gap-4">
+            <div className="flex flex-col items-center">
+              <div
+                className="h-12 w-12 shrink-0 rounded-full bg-[var(--accent-strong)] ring-2 ring-white/50"
+                aria-hidden
+              />
+              {index !== line ? (
+                <div
+                  className="w-px flex-1 min-h-[2.5rem] bg-[var(--accent-strong)]/70"
+                  aria-hidden
+                />
+              ) : null}
+            </div>
+            <Card
+              hover
+              className={`animate-dash-in flex min-h-[4.75rem] flex-1 flex-col justify-center gap-1`}
+              style={{ animationDelay: `${index * 50}ms` }}
+            >
+              <div className="flex w-full flex-wrap items-start justify-between gap-2">
+                <h3 className="text-lg font-semibold text-neutral-900">
+                  {item.type}
+                </h3>
+                <time
+                  className="text-xs tabular-nums text-neutral-600"
+                  dateTime={item.time}
+                >
+                  {item.time}
+                </time>
+              </div>
+              <p className="text-body-reading text-sm">{item.text}</p>
+            </Card>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

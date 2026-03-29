@@ -1,5 +1,9 @@
 "use client";
 
+import { Card } from "@/app/components/Card";
+import { EventRow } from "@/app/components/EventRow";
+import { SectionHeader } from "@/app/components/SectionHeader";
+import { StatusBadge } from "@/app/components/StatusBadge";
 import {
   DASHBOARD_FULL_STACK_FIRED_KEY,
   ENROLLMENT_QUERY,
@@ -67,7 +71,6 @@ function DashboardInner() {
       return;
     }
 
-    // Recovery: timer was lost (e.g. refresh) but enrollment landing was not yet completed.
     if (sessionStorage.getItem(FULL_STACK_SCHEDULED_KEY) === "1") {
       sessionStorage.removeItem(FULL_STACK_SCHEDULED_KEY);
       void fetch("/api/start-full-stack", { method: "POST" }).finally(() => {
@@ -91,12 +94,13 @@ function DashboardInner() {
       sessionStorage.removeItem(FULL_STACK_SCHEDULED_KEY);
     };
   }, [searchParams, router]);
+
   interface basicstatus {
     type: string;
     val: string;
   }
 
-  const [name, setname] = useState("Grandma");
+  const [name] = useState("Grandma");
   const [liveEvents, setLiveEvents] = useState<LiveEventItem[]>([]);
   const [eventsTz, setEventsTz] = useState(LIVE_EVENTS_TZ);
   const [eventsLoading, setEventsLoading] = useState(true);
@@ -153,72 +157,81 @@ function DashboardInner() {
     : null;
 
   return (
-    <>
-      <div className="p-10 w-full h-full flex flex-col gap-10 items-center justify-start">
-        <div className="flex justify-between w-[90%] md:w-[80%]">
-          <div className="flex flex-col gap-3">
-            <p className="font-bold text-3xl">Hello!</p>
-            <p className="font-thin text-gray-600 text-sm">
-              Here is whats happening with {name} today!
-            </p>
-          </div>
-          <div
-            className="flex items-center gap-2 rounded-full border border-white/40 bg-white/60 px-3 py-1.5 text-sm text-neutral-800 shadow-sm backdrop-blur-sm"
-            title={
-              syncLabel
-                ? `Last synced ${syncLabel} (${eventsTz})`
-                : "Waiting for first sync"
-            }
-          >
-            <span
-              className="inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-500"
-              aria-hidden
-            />
-            <span className="font-medium">Monitoring</span>
-            {syncLabel ? (
-              <span className="text-neutral-500">· {syncLabel}</span>
-            ) : null}
-          </div>
-        </div>
-        <div className="flex items-center justify-center gap-5 md:gap-10 w-[90%] md:w-[80%]">
-          {values.map((item, index) => (
-            <div
-              key={index}
-              className="shadow hover:shadow-xl transition duration-100 ease-in flex flex-col items-center justify-center bg-sky-50 w-[200px] h-[100px] lg:w-[500px] rounded-2xl"
+    <div className="mx-auto w-full max-w-5xl space-y-8 px-6 py-10">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <SectionHeader
+          eyebrow="Today"
+          title="Hello!"
+          description={`Here's what's happening with ${name} today.`}
+        />
+        <StatusBadge
+          label="Monitoring"
+          detail={syncLabel}
+          title={
+            syncLabel
+              ? `Last synced ${syncLabel} (${eventsTz})`
+              : "Waiting for first sync"
+          }
+          className="self-start sm:mt-8"
+        />
+      </div>
+
+      <section aria-labelledby="metrics-heading" className="space-y-4">
+        <h2 id="metrics-heading" className="text-section-label">
+          At a glance
+        </h2>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {values.map((item) => (
+            <Card
+              key={item.type}
+              className="flex min-h-[100px] flex-col items-center justify-center text-center"
             >
-              <p className="font-thin">{item.type}</p>
-              <p className="font-bold text-xl">{item.val}</p>
-            </div>
+              <p className="text-section-label text-[0.65rem] leading-tight">
+                {item.type}
+              </p>
+              <p className="mt-2 text-xl font-semibold tabular-nums text-neutral-900">
+                {item.val}
+              </p>
+            </Card>
           ))}
         </div>
-        <div className="flex flex-col gap-5 flex-wrap items-center justify-between w-[90%] md:w-[80%]">
-          <div className="flex w-full flex-wrap items-end justify-between gap-2">
-            <p className="font-bold text-3xl self-start">Live Updates</p>
-            <p className="text-xs text-neutral-600">
-              Refreshes every 2 min · {eventsTz.replace("_", " ")}
-            </p>
+      </section>
+
+      <section aria-labelledby="live-heading" className="space-y-4">
+        <SectionHeader
+          id="live-heading"
+          title="Live Updates"
+          description={`Refreshes every 2 min · ${eventsTz.replace("_", " ")}`}
+        />
+
+        {eventsError ? (
+          <Card
+            hover={false}
+            className="border-amber-200/90 bg-[var(--warning-bg)] text-[var(--warning-text)] ring-amber-200/50"
+          >
+            <p className="text-sm leading-relaxed">{eventsError}</p>
+          </Card>
+        ) : null}
+
+        {eventsLoading ? (
+          <div className="flex flex-col gap-3">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="h-24 w-full animate-pulse rounded-2xl bg-[var(--surface)] ring-1 ring-[var(--ring-subtle)]"
+              />
+            ))}
           </div>
-          {eventsError ? (
-            <div className="w-full rounded-2xl border border-amber-200/80 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
-              {eventsError}
-            </div>
-          ) : null}
-          {eventsLoading ? (
-            <div className="flex w-full flex-col gap-3">
-              {[0, 1, 2].map((i) => (
-                <div
-                  key={i}
-                  className="h-24 w-full animate-pulse rounded-2xl bg-sky-50/80 ring-1 ring-black/5"
-                />
-              ))}
-            </div>
-          ) : liveEvents.length === 0 && !eventsError ? (
-            <p className="w-full rounded-2xl border border-white/40 bg-sky-50/80 px-4 py-6 text-center text-sm text-neutral-600 shadow-sm ring-1 ring-black/5">
+        ) : liveEvents.length === 0 && !eventsError ? (
+          <Card hover={false} className="text-center">
+            <p className="text-sm leading-relaxed text-neutral-600">
               No recent events in the last 30 minutes. Events appear after the
               Snowflake task processes eating and fall alerts.
             </p>
-          ) : (
-            liveEvents.map((ev) => {
+          </Card>
+        ) : (
+          <div className="stagger-children flex flex-col gap-4">
+            {liveEvents.map((ev, index) => {
               const title =
                 ev.headline?.trim() ||
                 ev.event_type?.replace(/_/g, " ") ||
@@ -231,46 +244,28 @@ function DashboardInner() {
                 relative && absolute
                   ? `${absolute} · ${relative}`
                   : absolute;
-              const thumb = ev.frame_thumb_base64?.trim();
+              const subtitle =
+                ev.display_name != null && String(ev.display_name).trim()
+                  ? `${ev.display_name}${ev.meal_kind ? ` · ${ev.meal_kind.replace(/_/g, " ")}` : ""}`
+                  : ev.meal_kind
+                    ? ev.meal_kind.replace(/_/g, " ")
+                    : undefined;
               return (
-                <article
-                  key={ev.id ?? `${ev.observed_at}-${title}`}
-                  className="flex w-full flex-col gap-3 rounded-2xl border border-white/40 bg-sky-50 p-4 shadow-sm ring-1 ring-black/5 transition hover:shadow-md"
-                >
-                  <div className="flex w-full flex-wrap items-start justify-between gap-2">
-                    <p className="font-bold text-xl text-neutral-900">{title}</p>
-                    <p className="text-xs text-neutral-600 whitespace-nowrap">
-                      {timeLine}
-                    </p>
-                  </div>
-                  {ev.display_name ? (
-                    <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
-                      {ev.display_name}
-                      {ev.meal_kind
-                        ? ` · ${ev.meal_kind.replace(/_/g, " ")}`
-                        : ""}
-                    </p>
-                  ) : null}
-                  {ev.summary ? (
-                    <p className="text-sm leading-relaxed text-neutral-800">
-                      {ev.summary}
-                    </p>
-                  ) : null}
-                  {thumb ? (
-                    <img
-                      src={`data:image/jpeg;base64,${thumb}`}
-                      alt=""
-                      loading="lazy"
-                      className="max-h-48 w-full max-w-md rounded-xl object-cover ring-1 ring-black/10"
-                    />
-                  ) : null}
-                </article>
+                <EventRow
+                  key={ev.id ?? `${ev.observed_at}-${title}-${index}`}
+                  title={title}
+                  timeLine={timeLine}
+                  subtitle={subtitle}
+                  summary={ev.summary}
+                  imageSrc={ev.frame_thumb_base64}
+                  animationIndex={index}
+                />
               );
-            })
-          )}
-        </div>
-      </div>
-    </>
+            })}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -278,7 +273,7 @@ export default function DashboardPage() {
   return (
     <Suspense
       fallback={
-        <div className="p-10 w-full flex items-center justify-center text-gray-600">
+        <div className="text-body-reading flex min-h-[40vh] items-center justify-center px-6 text-neutral-600">
           Loading dashboard…
         </div>
       }

@@ -1,15 +1,9 @@
 "use client";
+
+import { Card } from "@/app/components/Card";
+import { SectionHeader } from "@/app/components/SectionHeader";
 import InsightCard from "../components/InsightCard";
 import { useState } from "react";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
 
 export default function Home() {
   const [grandma, setGrandma] = useState(true);
@@ -18,71 +12,65 @@ export default function Home() {
   const [grandpametric, setGrandpametric] = useState(0);
 
   return (
-    <>
-      <div className="p-10 w-full min-h-screen flex flex-col gap-10 items-center justify-start">
-        <div className="flex justify-between w-[90%] md:w-[80%]">
-          <div className="flex flex-col gap-3">
-            <h1 className="m-0 text-3xl font-bold text-black">
-              Health Insights
-            </h1>
-            <p className="mt-0 text-sm text-gray-600">
-              AI-powered analysis of weekly pattern and trends
-            </p>
-          </div>
-
-          <div className="flex gap-0 w-[200px] h-[50px] rounded-2xl border-0 bg-gray-200 justify-center">
-            <button
-              onClick={() => {
-                setGrandma(!grandma);
-              }}
-              className={`hover:shadow w-[50%] h-full hover:scale-110 rounded-tl-2xl rounded-bl-2xl transition duration-100 ease-in ${grandma ? "bg-sky-200" : "bg-gray-200"}`}
-            >
+    <div className="mx-auto w-full max-w-5xl space-y-8 px-6 py-10">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+        <SectionHeader
+          eyebrow="Analytics"
+          title="Health Insights"
+          description="AI-powered analysis of weekly patterns and trends."
+        />
+        <Card
+          hover={false}
+          padded={false}
+          className="inline-flex h-[52px] shrink-0 overflow-hidden p-0 ring-1 ring-[var(--ring-subtle)]"
+        >
+          <button
+            type="button"
+            onClick={() => setGrandma(!grandma)}
+            className={`h-full flex-1 px-5 text-sm font-medium transition duration-200 ds-motion-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600/40 ${
               grandma
-            </button>
-
-            <button
-              onClick={() => {
-                setGrandpa(!grandpa);
-              }}
-              className={`hover:shadow w-[50%] h-full hover:scale-110 rounded-tr-2xl rounded-br-2xl transition duration-100 ease-in ${grandpa ? "bg-sky-200" : "bg-gray-200"}`}
-            >
+                ? "bg-[var(--surface-muted)] text-neutral-900"
+                : "bg-[var(--surface)] text-neutral-600 hover:bg-sky-100/50"
+            }`}
+          >
+            Grandma
+          </button>
+          <button
+            type="button"
+            onClick={() => setGrandpa(!grandpa)}
+            className={`h-full flex-1 px-5 text-sm font-medium transition duration-200 ds-motion-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600/40 ${
               grandpa
-            </button>
-          </div>
-        </div>
-        {grandma && (
-          <>
-            <div className="flex flex-col w-[90%] md:w-[80%] ">
-              <h2 className="text-2xl font-bold">Grandma</h2>
-              <InsightCard
-                person="grandma"
-                metric={grandmametric}
-                setmetric={setGrandmametric}
-              />
-            </div>
-          </>
-        )}
-        {grandpa && (
-          <>
-            <div className="flex flex-col w-[90%] md:w-[80%] ">
-              <h2 className="text-2xl font-bold">Grandpa</h2>
-              <div className="flex flex-wrap justify-between items-center gap-5 w-[100%]">
-                <InsightCard
-                  person="grandpa"
-                  metric={grandpametric}
-                  setmetric={setGrandpametric}
-                />
-              </div>
-            </div>
-          </>
-        )}
+                ? "bg-[var(--surface-muted)] text-neutral-900"
+                : "bg-[var(--surface)] text-neutral-600 hover:bg-sky-100/50"
+            }`}
+          >
+            Grandpa
+          </button>
+        </Card>
       </div>
-    </>
+
+      {grandma ? (
+        <section className="space-y-4" aria-label="Grandma insights">
+          <h2 className="text-section-label">Grandma</h2>
+          <InsightCard
+            person="grandma"
+            metric={grandmametric}
+            setmetric={setGrandmametric}
+          />
+        </section>
+      ) : null}
+      {grandpa ? (
+        <section className="space-y-4" aria-label="Grandpa insights">
+          <h2 className="text-section-label">Grandpa</h2>
+          <div className="flex flex-wrap items-center justify-between gap-5">
+            <InsightCard
+              person="grandpa"
+              metric={grandpametric}
+              setmetric={setGrandpametric}
+            />
+          </div>
+        </section>
+      ) : null}
+    </div>
   );
 }
-
-/*
-            className={`w-[200px] h-[50px] rounded-lg transition duration-100 border-0 ease-in
-              ${grandma ? "bg-sky-200 shadow scale-105" : "bg-sky-50"}
-              `}
-*/
