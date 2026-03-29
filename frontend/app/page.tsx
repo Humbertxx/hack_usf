@@ -1,72 +1,85 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useContext, useState } from "react";
+import { OldPeopleContext, useOldPeopleContext } from "./OldPeopleContext";
 
 export default function Home() {
-  interface basicstatus {
-    type: string;
-    val: string;
-  }
+  // 1 for grandma, 2 for grandpa, 3 for both
+  const { oldPeople, setOldPeople } = useOldPeopleContext();
 
-  const [name, setname] = useState("Grandma");
-  const updates: basicstatus[] = [
-    { type: "Went to bed", val: "Granny went to bed" },
-    { type: "Codin", val: "Granny is currently working hard at the hackathon" },
-    { type: "Wishin", val: "Granny is wishing they had better food portions" },
-    { type: "Eating", val: "Granny is eating a meal" },
-  ];
-  const values: basicstatus[] = [
-    { type: "Active Hours", val: "8.5" },
-    { type: "Sleep Quality", val: "Good" },
-    { type: "Exercise", val: "1" },
-    { type: "Meals", val: "3" },
-  ];
+  const grandpa = () => {
+    if (oldPeople === 2) {
+      setOldPeople(0);
+    } else if (oldPeople === 1) {
+      setOldPeople(3);
+    } else if (oldPeople === 3) {
+      setOldPeople(1);
+    } else {
+      setOldPeople(2);
+    }
+  };
+
+  const grandma = () => {
+    if (oldPeople === 1) {
+      setOldPeople(0);
+    } else if (oldPeople === 2) {
+      setOldPeople(3);
+    } else if (oldPeople === 3) {
+      setOldPeople(2);
+    } else {
+      setOldPeople(1);
+    }
+  };
 
   return (
     <>
-      <div className="p-10 w-full h-full flex flex-col gap-10 items-center justify-start">
-        <div className="flex justify-between w-[90%] md:w-[80%]">
-          <div className="flex flex-col gap-3">
-            <p className="font-bold text-3xl">Hello!</p>
-            <p className="font-thin text-gray-600 text-sm">
-              Here is whats happening with {name} today!
-            </p>
-          </div>
-          <div>
-            <p className="bg-green-500 p-2 rounded">System Status</p>
-          </div>
+      <div className="flex flex-col items-center justify-center w-screen mt-10 gap-5">
+        <p className="font-bold text-lg md:text-xl lg:text-3xl">
+          Welcome to Enrollment! Choose family members to enroll below.
+        </p>
+        <Image
+          src="/oldpeople.jpg"
+          alt="Family"
+          width={400}
+          height={400}
+          className="w-[400px] h-[400px] object-cover rounded-2xl shadow"
+        />
+        <div className="shadow flex justify-center items-center bg-sky-50 rounded-2xl w-[300px] h-[50px]">
+          <button
+            onClick={() => grandma()}
+            className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-l-2xl hover:scale-110 transition duration-100 ease-in ${oldPeople === 1 || oldPeople === 3 ? "bg-sky-200" : ""}`}
+          >
+            grandma
+          </button>
+          <button
+            onClick={() => grandpa()}
+            className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-r-2xl hover:scale-110 transition duration-100 ease-in ${oldPeople === 2 || oldPeople === 3 ? "bg-sky-200" : ""}`}
+          >
+            grandpa
+          </button>
         </div>
-        <div className="flex items-center justify-center gap-5 md:gap-10 w-[90%] md:w-[80%]">
-          {values.map((item, index) => (
-            <div
-              key={index}
-              className="shadow hover:shadow-xl transition duration-100 ease-in flex flex-col items-center justify-center bg-sky-50 w-[200px] h-[100px] lg:w-[500px] rounded-2xl"
-            >
-              <p className="font-thin">{item.type}</p>
-              <p className="font-bold text-xl">{item.val}</p>
+        <div className="flex items-center justify-center gap-5">
+          {oldPeople === 0 && (
+            <div className="bg-sky-50 p-5 rounded-lg shadow">
+              <p className="font-bold text-lg">No One Selected!</p>
             </div>
-          ))}
-        </div>
-        <div className="flex flex-col gap-5 flex-wrap items-center justify-between w-[90%] md:w-[80%]">
-          <div className="flex items-center justify-between w-full">
-            <p className="font-bold text-3xl self-start">Live Updates</p>
-            <p className="text-xs">Currently Monitoring</p>
-          </div>
-          {updates.map((item, index) => (
-            <div
-              key={index}
-              className="shadow hover:shadow-xl transition duration-100 ease-in p-3 flex flex-col items-start justify-start bg-sky-50 w-full h-[75px] rounded-2xl"
-            >
-              <div className="w-full flex justify-between">
-                <p className="font-bold text-xl">{item.type}</p>
-                <p className="light text-xs text-gray-600">
-                  this happened __ minutes ago
-                </p>
-              </div>
-              <p className="text-sm">{item.val}</p>
-            </div>
-          ))}
+          )}
+          {oldPeople === 1 && (
+            <button className="bg-sky-50 p-5 rounded-lg shadow hover:scale-110 transition duration-100 ease-in">
+              <p className="font-bold text-lg">Select Grandma</p>
+            </button>
+          )}
+          {oldPeople === 2 && (
+            <button className="bg-sky-50 p-5 rounded-lg shadow hover:scale-110 transition duration-100 ease-in">
+              <p className="font-bold text-lg">Select Grandpa</p>
+            </button>
+          )}
+          {oldPeople === 3 && (
+            <button className="bg-sky-50 p-5 rounded-lg shadow hover:scale-110 transition duration-100 ease-in">
+              <p className="font-bold text-lg">Select Grandparents</p>
+            </button>
+          )}
         </div>
       </div>
     </>

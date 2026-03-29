@@ -1,4 +1,7 @@
+"use client";
+
 import Image from "next/image";
+import { use, useState } from "react";
 
 export default function Home() {
   interface basicstatus {
@@ -14,6 +17,11 @@ export default function Home() {
     { type: "Cruisin", text: "Granny has a nice car", time: "6:50am" },
   ];
 
+  //0 for today, 1 for yesterday, 2 for last week
+  const [time, settime] = useState(0);
+  const [grandma, setgrandma] = useState(true);
+  const [grandpa, setgrandpa] = useState(false);
+
   return (
     <>
       <div className="p-10 w-full h-full flex flex-col gap-5 items-center justify-start">
@@ -23,16 +31,39 @@ export default function Home() {
             Here is whats happening with today!
           </p>
         </div>
-        <div className="flex items-center w-[90%] md:w-[80%]">
+        <div className="flex items-center justify-between w-[90%] md:w-[80%]">
           <div className="shadow flex justify-center items-center bg-sky-50 rounded-2xl w-[300px] h-[50px]">
-            <button className="hover:shadow bg-sky-50 w-[33%] h-full rounded-l-2xl hover:scale-110 transition duration-100 ease-in">
+            <button
+              onClick={time === 0 ? () => settime(-1) : () => settime(0)}
+              className={`hover:shadow bg-sky-50 w-[34%] h-full rounded-l-2xl hover:scale-110 transition duration-100 ease-in ${time === 0 ? "bg-sky-200" : ""}`}
+            >
               today
             </button>
-            <button className="hover:shadow bg-sky-50 w-[33%] h-full hover:scale-110 transition duration-100 ease-in">
+            <button
+              onClick={time === 1 ? () => settime(-1) : () => settime(1)}
+              className={`hover:shadow bg-sky-50 w-[34%] h-full hover:scale-110 transition duration-100 ease-in ${time === 1 ? "bg-sky-200" : ""}`}
+            >
               yesterday
             </button>
-            <button className="hover:shadow bg-sky-50 w-[33%] h-full rounded-r-2xl hover:scale-110 transition duration-100 ease-in">
+            <button
+              onClick={time === 2 ? () => settime(-1) : () => settime(2)}
+              className={`hover:shadow bg-sky-50 w-[34%] h-full rounded-r-2xl hover:scale-110 transition duration-100 ease-in ${time === 2 ? "bg-sky-200" : ""}`}
+            >
               last week
+            </button>
+          </div>
+          <div className="shadow flex justify-center items-center bg-sky-50 rounded-2xl w-[300px] h-[50px]">
+            <button
+              onClick={() => setgrandma(!grandma)}
+              className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-l-2xl hover:scale-110 transition duration-100 ease-in ${grandma ? "bg-sky-200" : ""}`}
+            >
+              grandma
+            </button>
+            <button
+              onClick={() => setgrandpa(!grandpa)}
+              className={`hover:shadow bg-sky-50 w-[50%] h-full rounded-r-2xl hover:scale-110 transition duration-100 ease-in ${grandpa ? "bg-sky-200" : ""}`}
+            >
+              grandpa
             </button>
           </div>
         </div>
