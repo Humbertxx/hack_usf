@@ -1,12 +1,60 @@
 "use client";
 
+import { Card } from "@/app/components/Card";
+import { EventRow } from "@/app/components/EventRow";
+import { SectionHeader } from "@/app/components/SectionHeader";
+import { StatusBadge } from "@/app/components/StatusBadge";
 import {
   DASHBOARD_FULL_STACK_FIRED_KEY,
   ENROLLMENT_QUERY,
   ENROLLMENT_VALUE,
 } from "@/lib/enrollment-flags";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+
+const LIVE_EVENTS_TZ = "America/New_York";
+const POLL_MS = 120_000;
+
+type LiveEventItem = {
+  id: string | null;
+  event_type: string | null;
+  headline: string | null;
+  summary: string | null;
+  meal_kind: string | null;
+  observed_at: string | null;
+  display_name: string | null;
+  frame_thumb_base64: string | null;
+};
+
+type LiveEventsPayload = {
+  timezone?: string;
+  events: LiveEventItem[];
+  detail?: string;
+  error?: string;
+};
+
+function formatEventTimes(iso: string | null, tz: string) {
+  if (!iso) {
+    return { absolute: "—", relative: "" };
+  }
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) {
+    return { absolute: "—", relative: "" };
+  }
+  const absolute = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(d);
+  const diffMs = Date.now() - d.getTime();
+  const mins = Math.round(diffMs / 60_000);
+  let relative: string;
+  if (mins <= 0) relative = "just now";
+  else if (mins < 60) relative = `${mins} min ago`;
+  else if (mins < 1440) relative = `${Math.floor(mins / 60)} hr ago`;
+  else relative = `${Math.floor(mins / 1440)} days ago`;
+  return { absolute, relative };
+}
 
 /** Persist across reload if the 6s timer was scheduled but the tab navigated away / refreshed. */
 const FULL_STACK_SCHEDULED_KEY = "hack_usf_dashboard_full_stack_scheduled";
@@ -23,7 +71,6 @@ function DashboardInner() {
       return;
     }
 
-    // Recovery: timer was lost (e.g. refresh) but enrollment landing was not yet completed.
     if (sessionStorage.getItem(FULL_STACK_SCHEDULED_KEY) === "1") {
       sessionStorage.removeItem(FULL_STACK_SCHEDULED_KEY);
       void fetch("/api/start-full-stack", { method: "POST" }).finally(() => {
@@ -47,18 +94,19 @@ function DashboardInner() {
       sessionStorage.removeItem(FULL_STACK_SCHEDULED_KEY);
     };
   }, [searchParams, router]);
+
   interface basicstatus {
     type: string;
     val: string;
   }
 
-  const [name, setname] = useState("Grandma");
-  const updates: basicstatus[] = [
-    { type: "Went to bed", val: "Granny went to bed" },
-    { type: "Codin", val: "Granny is currently working hard at the hackathon" },
-    { type: "Wishin", val: "Granny is wishing they had better food portions" },
-    { type: "Eating", val: "Granny is eating a meal" },
-  ];
+  const [name] = useState("Grandma");
+  const [liveEvents, setLiveEvents] = useState<LiveEventItem[]>([]);
+  const [eventsTz, setEventsTz] = useState(LIVE_EVENTS_TZ);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+
   const values: basicstatus[] = [
     { type: "Active Hours", val: "8.5" },
     { type: "Sleep Quality", val: "Good" },
@@ -66,53 +114,158 @@ function DashboardInner() {
     { type: "Meals", val: "3" },
   ];
 
+  const fetchLiveEvents = useCallback(async () => {
+    try {
+      const r = await fetch("/api/live-events?minutes=30&limit=50", {
+        cache: "no-store",
+      });
+      const data: LiveEventsPayload = await r.json();
+      if (!r.ok) {
+        const msg =
+          typeof data.detail === "string"
+            ? data.detail
+            : data.error ?? `HTTP ${r.status}`;
+        setEventsError(msg);
+        return;
+      }
+      setEventsError(null);
+      setLiveEvents(Array.isArray(data.events) ? data.events : []);
+      if (typeof data.timezone === "string" && data.timezone) {
+        setEventsTz(data.timezone);
+      }
+      setLastSyncedAt(new Date());
+    } catch {
+      setEventsError("Could not load live events");
+    } finally {
+      setEventsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchLiveEvents();
+    const id = window.setInterval(() => void fetchLiveEvents(), POLL_MS);
+    return () => window.clearInterval(id);
+  }, [fetchLiveEvents]);
+
+  const syncLabel = lastSyncedAt
+    ? new Intl.DateTimeFormat("en-US", {
+        timeZone: eventsTz,
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+      }).format(lastSyncedAt)
+    : null;
+
   return (
-    <>
-      <div className="p-10 w-full h-full flex flex-col gap-10 items-center justify-start">
-        <div className="flex justify-between w-[90%] md:w-[80%]">
-          <div className="flex flex-col gap-3">
-            <p className="font-bold text-3xl">Hello!</p>
-            <p className="font-thin text-gray-600 text-sm">
-              Here is whats happening with {name} today!
-            </p>
-          </div>
-          <div>
-            <p className="bg-green-500 p-2 rounded">System Status</p>
-          </div>
-        </div>
-        <div className="flex items-center justify-center gap-5 md:gap-10 w-[90%] md:w-[80%]">
-          {values.map((item, index) => (
-            <div
-              key={index}
-              className="shadow hover:shadow-xl transition duration-100 ease-in flex flex-col items-center justify-center bg-sky-50 w-[200px] h-[100px] lg:w-[500px] rounded-2xl"
-            >
-              <p className="font-thin">{item.type}</p>
-              <p className="font-bold text-xl">{item.val}</p>
-            </div>
-          ))}
-        </div>
-        <div className="flex flex-col gap-5 flex-wrap items-center justify-between w-[90%] md:w-[80%]">
-          <div className="flex items-center justify-between w-full">
-            <p className="font-bold text-3xl self-start">Live Updates</p>
-            <p className="text-xs">Currently Monitoring</p>
-          </div>
-          {updates.map((item, index) => (
-            <div
-              key={index}
-              className="shadow hover:shadow-xl transition duration-100 ease-in p-3 flex flex-col items-start justify-start bg-sky-50 w-full h-[75px] rounded-2xl"
-            >
-              <div className="w-full flex justify-between">
-                <p className="font-bold text-xl">{item.type}</p>
-                <p className="light text-xs text-gray-600">
-                  this happened __ minutes ago
-                </p>
-              </div>
-              <p className="text-sm">{item.val}</p>
-            </div>
-          ))}
-        </div>
+    <div className="mx-auto w-full max-w-5xl space-y-8 px-6 py-10">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <SectionHeader
+          eyebrow="Today"
+          title="Hello!"
+          description={`Here's what's happening with ${name} today.`}
+        />
+        <StatusBadge
+          label="Monitoring"
+          detail={syncLabel}
+          title={
+            syncLabel
+              ? `Last synced ${syncLabel} (${eventsTz})`
+              : "Waiting for first sync"
+          }
+          className="self-start sm:mt-8"
+        />
       </div>
-    </>
+
+      <section aria-labelledby="metrics-heading" className="space-y-4">
+        <h2 id="metrics-heading" className="text-section-label">
+          At a glance
+        </h2>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {values.map((item) => (
+            <Card
+              key={item.type}
+              className="flex min-h-[100px] flex-col items-center justify-center text-center"
+            >
+              <p className="text-section-label text-[0.65rem] leading-tight">
+                {item.type}
+              </p>
+              <p className="mt-2 text-xl font-semibold tabular-nums text-neutral-900">
+                {item.val}
+              </p>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      <section aria-labelledby="live-heading" className="space-y-4">
+        <SectionHeader
+          id="live-heading"
+          title="Live Updates"
+          description={`Refreshes every 2 min · ${eventsTz.replace("_", " ")}`}
+        />
+
+        {eventsError ? (
+          <Card
+            hover={false}
+            className="border-amber-200/90 bg-[var(--warning-bg)] text-[var(--warning-text)] ring-amber-200/50"
+          >
+            <p className="text-sm leading-relaxed">{eventsError}</p>
+          </Card>
+        ) : null}
+
+        {eventsLoading ? (
+          <div className="flex flex-col gap-3">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="h-24 w-full animate-pulse rounded-2xl bg-[var(--surface)] ring-1 ring-[var(--ring-subtle)]"
+              />
+            ))}
+          </div>
+        ) : liveEvents.length === 0 && !eventsError ? (
+          <Card hover={false} className="text-center">
+            <p className="text-sm leading-relaxed text-neutral-600">
+              No recent events in the last 30 minutes. Events appear after the
+              Snowflake task processes eating and fall alerts.
+            </p>
+          </Card>
+        ) : (
+          <div className="stagger-children flex flex-col gap-4">
+            {liveEvents.map((ev, index) => {
+              const title =
+                ev.headline?.trim() ||
+                ev.event_type?.replace(/_/g, " ") ||
+                "Update";
+              const { absolute, relative } = formatEventTimes(
+                ev.observed_at,
+                eventsTz,
+              );
+              const timeLine =
+                relative && absolute
+                  ? `${absolute} · ${relative}`
+                  : absolute;
+              const subtitle =
+                ev.display_name != null && String(ev.display_name).trim()
+                  ? `${ev.display_name}${ev.meal_kind ? ` · ${ev.meal_kind.replace(/_/g, " ")}` : ""}`
+                  : ev.meal_kind
+                    ? ev.meal_kind.replace(/_/g, " ")
+                    : undefined;
+              return (
+                <EventRow
+                  key={ev.id ?? `${ev.observed_at}-${title}-${index}`}
+                  title={title}
+                  timeLine={timeLine}
+                  subtitle={subtitle}
+                  summary={ev.summary}
+                  imageSrc={ev.frame_thumb_base64}
+                  animationIndex={index}
+                />
+              );
+            })}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -120,7 +273,7 @@ export default function DashboardPage() {
   return (
     <Suspense
       fallback={
-        <div className="p-10 w-full flex items-center justify-center text-gray-600">
+        <div className="text-body-reading flex min-h-[40vh] items-center justify-center px-6 text-neutral-600">
           Loading dashboard…
         </div>
       }

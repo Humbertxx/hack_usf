@@ -10,6 +10,7 @@ import {
 } from "recharts";
 
 import { useState } from "react";
+import { Card, CardButton } from "./Card";
 
 type InsightCardProps = {
   person: "grandma" | "grandpa";
@@ -122,37 +123,50 @@ export default function InsightCard({
 
   return (
     <>
-      <div className="flex flex-wrap justify-between items-center gap-5 w-[100%]">
-        <div className="flex flex-col items-center w-[100%] gap-1">
-          <div className="bg-white w-[100%] h-[200px] shadow flex items-center justify-center text-gray-600 text-xl rounded-2xl">
+      <div className="flex w-full flex-wrap items-center justify-between gap-5">
+        <div className="flex w-full flex-col items-center gap-3">
+          <Card
+            hover={false}
+            className="flex min-h-[200px] w-full items-center justify-center rounded-2xl bg-white/90 text-xl text-neutral-600"
+          >
             {recievedmessage}
-          </div>
-          <div className="flex items-center justify-between w-[100%]">
+          </Card>
+          <div className="flex w-full items-center justify-between gap-3">
             <input
-              className="bg-sky-50 w-[45%] h-10 rounded-md shadow"
+              className="h-10 w-[45%] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] px-3 text-sm shadow-sm ring-1 ring-[var(--ring-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40"
               placeholder="Type your message..."
               value={message || ""}
               onChange={(e) => setmessage(e.target.value)}
-            ></input>
+            />
             <button
+              type="button"
               onClick={() => setmessage("")}
-              className="bg-sky-50 w-[45%] h-10 rounded-md shadow hover:bg-sky-200 transition duration-100 ease-in"
+              className="h-10 w-[45%] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface)] text-sm font-medium shadow-sm ring-1 ring-[var(--ring-subtle)] transition duration-200 hover:bg-[var(--surface-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40 ds-motion-hover"
             >
               Send
             </button>
           </div>
         </div>
         {titleData[person].map((item, index) => (
-          <button
+          <CardButton
             key={index}
-            className={`flex flex-col p-5 items-start gap-5 justify-center shadow-lg 2xl:w-[320px] 2xl:h-[180px] md:w-[210px] md:h-[110px] rounded-2xl hover:shadow-2xl ${metric === index + 1 ? "bg-sky-200" : "bg-sky-50"}`}
+            className={`flex flex-col items-start justify-center gap-2 md:h-[110px] md:w-[210px] 2xl:h-[180px] 2xl:w-[320px] ${
+              metric === index + 1
+                ? "bg-[var(--surface-muted)] ring-emerald-600/30"
+                : ""
+            }`}
             onClick={() => setmetric?.(index + 1)}
           >
-            <p className="text-2xl">{item.measurement}</p>
-            <p className="text-base text-gray-500">{item.description}</p>
-          </button>
+            <p className="text-2xl font-semibold tabular-nums">
+              {item.measurement}
+            </p>
+            <p className="text-base text-neutral-600">{item.description}</p>
+          </CardButton>
         ))}
-        <div className="h-[400px] w-full">
+        <Card
+          hover={false}
+          className="h-[400px] min-h-[400px] w-full min-w-0 overflow-hidden p-3 md:p-4"
+        >
           {/* ResponsiveContainer makes the chart fill its parent div */}
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartDataMap[metric || 1]}>
@@ -176,7 +190,7 @@ export default function InsightCard({
               <Line type="monotone" dataKey="profit" stroke="#82ca9d" />
             </LineChart>
           </ResponsiveContainer>
-        </div>
+        </Card>
       </div>
     </>
   );

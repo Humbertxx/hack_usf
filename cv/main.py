@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -17,13 +18,13 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from dotenv import load_dotenv
 
 from cv.alert_engine import AlertEngine
 from cv.cv_pipeline import CVPipeline
 from cv.identity_store import IdentityStore
-from cv.models import Alert, Observation
+from cv.models import ActivityType, Alert, Observation
 from cv.noise_filter import should_send
 from cv.reid_embeddings import ReIDEmbedder
 from cv.snowflake_client import create_snowflake_client
@@ -88,6 +89,40 @@ def should_send_to_snowflake(
     return True
 
 
+_THUMB_MAX_WIDTH = 320
+_THUMB_JPEG_QUALITY = 70
+
+
+def _encode_frame_thumbnail_bgr(frame: np.ndarray) -> Optional[str]:
+    """Resize and JPEG-encode a BGR frame; return base64 ASCII or None on failure."""
+    if frame is None or frame.size == 0:
+        return None
+    h, w = frame.shape[:2]
+    if w > _THUMB_MAX_WIDTH:
+        scale = _THUMB_MAX_WIDTH / w
+        new_w = _THUMB_MAX_WIDTH
+        new_h = max(1, int(h * scale))
+        frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(
+        ".jpg",
+        frame,
+        [int(cv2.IMWRITE_JPEG_QUALITY), _THUMB_JPEG_QUALITY],
+    )
+    if not ok:
+        return None
+    return base64.b64encode(buf.tobytes()).decode("ascii")
+
+
+def _should_persist_thumbnail(obs: Observation, alert: Optional[Alert]) -> bool:
+    if alert is not None and alert.alert_type == "fall_detected":
+        return True
+    if obs.is_fall_risk:
+        return True
+    if obs.activity == ActivityType.EATING:
+        return True
+    return False
+
+
 class MockSnowflakeClient:
     def __init__(self) -> None:
         self.observations: list[Observation] = []
@@ -106,6 +141,14 @@ class MockSnowflakeClient:
 
     def flush(self) -> None:
         print("[MOCK SNOWFLAKE] Flushed batch")
+
+    def get_recent_live_events(
+        self,
+        *,
+        since_minutes: int = 30,
+        limit: int = 50,
+    ) -> List[dict[str, Any]]:
+        return []
 
 
 class ProcessFrameResponse(BaseModel):
@@ -132,6 +175,26 @@ class SubjectInfo(BaseModel):
 
 class SubjectListResponse(BaseModel):
     subjects: List[SubjectInfo]
+
+
+class LiveEventItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: Optional[str] = None
+    event_type: Optional[str] = None
+    headline: Optional[str] = None
+    summary: Optional[str] = None
+    meal_kind: Optional[str] = None
+    observed_at: Optional[str] = None
+    display_name: Optional[str] = None
+    frame_thumb_base64: Optional[str] = None
+
+
+class LiveEventsResponse(BaseModel):
+    """Live feed rows from Snowflake (LIVE_EVENTS + raw thumbnail)."""
+
+    timezone: str = "America/New_York"
+    events: List[LiveEventItem]
 
 
 def create_app(
@@ -162,6 +225,29 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/live-events", response_model=LiveEventsResponse)
+    def live_events(
+        minutes: int = Query(default=30, ge=1, le=10_080),
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> LiveEventsResponse:
+        """
+        Recent rows from LIVE_EVENTS (populated by the CORTEX_LIVE_EVENTS task),
+        with optional frame thumbnails from RAW_OBSERVATIONS.
+        """
+        try:
+            raw = app.state.snowflake.get_recent_live_events(
+                since_minutes=minutes,
+                limit=limit,
+            )
+        except Exception as e:
+            print(f"[api/live-events] Snowflake error: {e!r}")
+            raise HTTPException(
+                status_code=503,
+                detail="Failed to load live events from Snowflake",
+            ) from e
+        events = [LiveEventItem.model_validate(row) for row in raw]
+        return LiveEventsResponse(events=events)
 
     @app.post("/process-frame", response_model=ProcessFrameResponse)
     async def process_frame(
@@ -200,11 +286,20 @@ def create_app(
                 alert=None,
             )
 
+        alert = app.state.alert_engine.check(obs)
+        thumb_b64: Optional[str] = None
+        if _should_persist_thumbnail(obs, alert):
+            thumb_b64 = _encode_frame_thumbnail_bgr(frame)
+        obs_to_store = (
+            obs.model_copy(update={"frame_thumb_base64": thumb_b64})
+            if thumb_b64
+            else obs
+        )
+
         app.state.prev_sent = obs
-        app.state.snowflake.add_observation(obs)
+        app.state.snowflake.add_observation(obs_to_store)
         await app.state.ws_manager.broadcast_observation(obs)
 
-        alert = app.state.alert_engine.check(obs)
         alert_json: Optional[dict[str, Any]] = None
         if alert is not None:
             app.state.snowflake.add_alert(alert)

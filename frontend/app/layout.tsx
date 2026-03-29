@@ -28,9 +28,9 @@ export default function RootLayout({
     <>
       <html
         lang="en"
-        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} h-full`}
       >
-        <body className="min-h-screen flex flex-col">
+        <body className="flex min-h-screen flex-col font-sans antialiased">
           <OldPeopleProvider>
             <NavBar />
             {children}

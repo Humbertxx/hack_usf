@@ -105,7 +105,8 @@ class SnowflakeClient:
             'MOTION_LEVEL': obs.motion_level.value if hasattr(obs.motion_level, 'value') else obs.motion_level,
             'MINUTES_SINCE_LAST_SEEN': obs.minutes_since_last_seen,
             'FRAME_QUALITY': obs.frame_quality,
-            'SESSION_ID': obs.session_id
+            'SESSION_ID': obs.session_id,
+            'FRAME_THUMB_BASE64': getattr(obs, 'frame_thumb_base64', None),
         }
         self.observation_buffer.append(row)
         
