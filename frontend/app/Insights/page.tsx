@@ -32,25 +32,32 @@ export default function Home() {
             <button
               onClick={() => {
                 setGrandpa(!grandpa);
-              }} 
+              }}
               className={`hover:shadow w-[50%] h-full hover:scale-110 rounded-tr-2xl rounded-br-2xl transition duration-100 ease-in ${grandpa ? "bg-sky-200" : "bg-gray-200"}`}
-              >
-                grandpa
+            >
+              grandpa
             </button>
           </div>
         </div>
         {grandma && (
-        <div className="flex flex-wrap justify-between items-center gap-5 w-[90%] md:w-[80%]">
-          <h2 className="text-2xl font-bold">Grandma</h2>
-          <InsightCard person="grandma" />
-        </div> 
+          <>
+            <div className="flex flex-col w-[90%] md:w-[80%] ">
+              <h2 className="text-2xl font-bold">Grandma</h2>
+              <div className="flex flex-wrap justify-between items-center gap-5 w-[100%]">
+                <InsightCard person="grandma" />
+              </div>
+            </div>
+          </>
         )}
         {grandpa && (
-
-          <div className="flex flex-wrap justify-between items-center gap-5 w-[90%] md:w-[80%]">
-            <h2 className="text-2xl font-bold">Grandpa</h2>
-            <InsightCard person="grandpa"/>
-          </div>
+          <>
+            <div className="flex flex-col w-[90%] md:w-[80%] ">
+              <h2 className="text-2xl font-bold">Grandpa</h2>
+              <div className="flex flex-wrap justify-between items-center gap-5 w-[100%]">
+                <InsightCard person="grandpa" />
+              </div>
+            </div>
+          </>
         )}
       </div>
     </>

@@ -32,7 +32,7 @@ export const useOldPeopleContext = () => {
 
 export const OldPeopleProvider = ({ children }: ProviderProps) => {
   const [oldPeople, setOldPeople] = useState<number>(0);
-  const [Navbar, setNavbar] = useState<boolean>(false);
+  const [Navbar, setNavbar] = useState<boolean>(true);
   return (
     <OldPeopleContext.Provider
       value={{ oldPeople, setOldPeople, Navbar, setNavbar }}
