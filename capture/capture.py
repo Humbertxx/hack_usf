@@ -14,9 +14,9 @@ import httpx
 import numpy as np
 
 # Defaults per WORKSTREAM_A_CV_SETUP.md Phase 4.1
-RESOLUTION = (1280, 720)
-CAPTURE_INTERVAL = 5  # seconds
-JPEG_QUALITY = 85
+RESOLUTION = (1920, 1080)
+CAPTURE_INTERVAL = 2  # seconds
+JPEG_QUALITY = 95
 SERVER_URL = "http://localhost:8080/process-frame"
 
 _DEFAULT_MAX_QUEUE = 64
@@ -317,6 +317,13 @@ def run_capture(
             f"Cannot open camera index {cfg.camera_index}. "
             "On macOS grant Camera access to your terminal app."
         )
+    
+    # Request high resolution from camera hardware (better quality than software resize)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.height)
+    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(f"[capture] Camera resolution: requested {cfg.width}x{cfg.height}, actual {actual_w}x{actual_h}")
 
     pending: Deque[bytes] = deque(maxlen=cfg.max_queue)
     last_capture_time = 0.0
@@ -409,6 +416,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.dry_run:
         cap = cv2.VideoCapture(cfg.camera_index)
         opened = cap.isOpened()
+        if opened:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.height)
+            actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         cap.release()
         if not opened:
             print(
@@ -419,7 +431,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(
             f"OK: camera {cfg.camera_index} opens; would POST to {cfg.server_url!r} "
             f"every {cfg.capture_interval_sec}s at {cfg.width}x{cfg.height} "
-            f"(jpeg q={cfg.jpeg_quality})."
+            f"(actual camera: {actual_w}x{actual_h}, jpeg q={cfg.jpeg_quality})."
         )
         return 0
 
