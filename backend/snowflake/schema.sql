@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS RAW_OBSERVATIONS (
     POSE_CONFIDENCE FLOAT NOT NULL,
     
     -- Activity inference
-    ACTIVITY STRING,                -- 'eating', 'watching_tv', 'sleeping', 'cooking', 'idle'
+    ACTIVITY STRING,                -- 'eating', 'watching_tv', 'idle', 'unknown'
     ACTIVITY_CONFIDENCE FLOAT,
     
     -- Context

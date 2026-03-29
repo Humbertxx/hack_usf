@@ -8,8 +8,8 @@
 #
 # Official selector: https://pytorch.org/get-started/locally/ (Linux + CUDA 12.8)
 #
-# MediaPipe pose: set CV_POSE_BACKEND=auto|legacy|tasks|none (default auto). RunPod/Linux usually supports
-# tasks or legacy; some macOS/headless setups require `none` or Linux+EGL. Lite model caches under cv/.cache/
+# MediaPipe pose: default CV_POSE_BACKEND=tasks (BlazePose heavy landmarker only; no legacy fallback).
+# Set none to disable pose, or legacy only if you need mediapipe.solutions.pose. Heavy model caches under cv/.cache/
 # Headless containers: MediaPipe *tasks* may need OpenGL ES (`libGLESv2.so.2`). If startup fails, try:
 #   apt-get update && apt-get install -y libgles2-mesa
 # or rely on `auto` falling back to pose disabled when tasks cannot load (YOLO still runs).

@@ -9,6 +9,70 @@ import { getPreferredVideoStream } from "@/lib/getPreferredVideoStream";
 
 type DuoStep = "idle" | "grandma" | "grandpa";
 
+const PHOTO_STEPS = [
+  {
+    key: "front",
+    title: "Front view",
+    hint: "Face the camera with arms relaxed at your sides.",
+  },
+  {
+    key: "side",
+    title: "Side view",
+    hint: "Turn 90° so we see your profile (left or right side).",
+  },
+  {
+    key: "back",
+    title: "Back view",
+    hint: "Turn so your back faces the camera.",
+  },
+] as const;
+
+function PoseGuideSvg({ variant }: { variant: "front" | "side" | "back" }) {
+  const stroke = "currentColor";
+  const common = "w-28 h-36 mx-auto text-sky-800/80";
+  if (variant === "front") {
+    return (
+      <svg className={common} viewBox="0 0 80 120" aria-hidden>
+        <circle cx="40" cy="18" r="10" fill="none" stroke={stroke} strokeWidth="2.5" />
+        <path
+          d="M40 28 L40 62 M22 42 L58 42 M40 62 L28 98 M40 62 L52 98 M28 98 L24 112 M52 98 L56 112"
+          fill="none"
+          stroke={stroke}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (variant === "side") {
+    return (
+      <svg className={common} viewBox="0 0 80 120" aria-hidden>
+        <ellipse cx="48" cy="18" rx="9" ry="11" fill="none" stroke={stroke} strokeWidth="2.5" />
+        <path
+          d="M42 28 Q32 44 32 60 L35 88 M35 88 L32 108 M35 88 L48 108"
+          fill="none"
+          stroke={stroke}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg className={common} viewBox="0 0 80 120" aria-hidden>
+      <circle cx="40" cy="18" r="10" fill="none" stroke={stroke} strokeWidth="2.5" />
+      <path
+        d="M40 28 L40 62 M28 44 L52 44 M40 62 L30 96 M40 62 L50 96 M30 96 L26 110 M50 96 L54 110"
+        fill="none"
+        stroke={stroke}
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />
+      <path d="M22 38 L18 48" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function canvasToJpegBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
   return new Promise((resolve) => {
     canvas.toBlob((blob) => resolve(blob), "image/jpeg");
@@ -23,6 +87,7 @@ export default function Home() {
 
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [duoStep, setDuoStep] = useState<DuoStep>("idle");
+  const [enrollPhotoStep, setEnrollPhotoStep] = useState(1);
   const [enrollError, setEnrollError] = useState<string | null>(null);
   const [isEnrolling, setIsEnrolling] = useState(false);
 
@@ -74,6 +139,12 @@ export default function Home() {
     }
   }, []);
 
+  const startCameraWithReset = useCallback(() => {
+    setEnrollPhotoStep(1);
+    setEnrollError(null);
+    setIsCameraActive(true);
+  }, []);
+
   const captureAndEnroll = async (subjectId: "grandma" | "grandpa") => {
     const canvas = canvasRef.current;
     const video = videoRef.current;
@@ -91,7 +162,7 @@ export default function Home() {
     }
 
     const formData = new FormData();
-    formData.append("file", blob, "enroll.jpg");
+    formData.append("file", blob, `enroll-step${enrollPhotoStep}.jpg`);
     formData.append("subject_id", subjectId);
     formData.append(
       "display_name",
@@ -133,8 +204,14 @@ export default function Home() {
         return;
       }
 
+      if (enrollPhotoStep < 3) {
+        setEnrollPhotoStep((s) => s + 1);
+        return;
+      }
+
       if (oldPeople === 3 && subjectId === "grandma") {
         setDuoStep("grandpa");
+        setEnrollPhotoStep(1);
         return;
       }
 
@@ -149,7 +226,7 @@ export default function Home() {
   };
 
   const grandpa = () => {
-    if (duoStep !== "idle") return;
+    if (duoStep !== "idle" || isCameraActive) return;
     if (oldPeople === 2) setOldPeople(0);
     else if (oldPeople === 1) setOldPeople(3);
     else if (oldPeople === 3) setOldPeople(1);
@@ -157,7 +234,7 @@ export default function Home() {
   };
 
   const grandma = () => {
-    if (duoStep !== "idle") return;
+    if (duoStep !== "idle" || isCameraActive) return;
     if (oldPeople === 1) setOldPeople(0);
     else if (oldPeople === 2) setOldPeople(3);
     else if (oldPeople === 3) setOldPeople(2);
@@ -166,33 +243,51 @@ export default function Home() {
 
   const startDuo = () => {
     setDuoStep("grandma");
-    setIsCameraActive(true);
-    setEnrollError(null);
+    startCameraWithReset();
   };
 
   const cancelCamera = () => {
     stopVideoTracks();
     setIsCameraActive(false);
     setDuoStep("idle");
+    setEnrollPhotoStep(1);
     setEnrollError(null);
   };
 
-  const toggleLocked = duoStep !== "idle";
+  const toggleLocked = duoStep !== "idle" || isCameraActive;
+  const stepMeta = PHOTO_STEPS[enrollPhotoStep - 1];
+  const guideVariant = stepMeta.key;
 
   return (
     <>
       <div className="flex flex-col items-center justify-center w-screen mt-10 gap-5">
-        <div className="text-center max-w-xl">
+        <div className="text-center max-w-xl px-3">
           <p className="font-bold text-lg md:text-xl lg:text-3xl">
             {isCameraActive
-              ? "Step back — fit full body in frame"
+              ? `${stepMeta.title} · Step ${enrollPhotoStep} of 3`
               : "Welcome to Enrollment! Choose family members to enroll below."}
           </p>
-          {isCameraActive && oldPeople === 3 && duoStep === "grandpa" && (
-            <p className="mt-2 text-base md:text-lg text-sky-800 font-medium">
-              Next: Grandpa
-            </p>
+          {isCameraActive && (
+            <>
+              <p className="mt-2 text-base md:text-lg text-sky-900">
+                Step back — fit full body in frame.
+              </p>
+              <p className="mt-1 text-base md:text-lg text-sky-800/90">
+                {stepMeta.hint}
+              </p>
+              <div className="mt-3 flex justify-center">
+                <PoseGuideSvg variant={guideVariant} />
+              </div>
+            </>
           )}
+          {isCameraActive &&
+            oldPeople === 3 &&
+            duoStep === "grandpa" &&
+            enrollPhotoStep === 1 && (
+              <p className="mt-2 text-base md:text-lg text-sky-800 font-medium">
+                Now enrolling Grandpa — same 3 poses
+              </p>
+            )}
         </div>
 
         <div className="relative w-[400px] h-[400px]">
@@ -257,15 +352,22 @@ export default function Home() {
               onClick={() =>
                 isCameraActive
                   ? void captureAndEnroll("grandma")
-                  : setIsCameraActive(true)
+                  : startCameraWithReset()
               }
               className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
             >
               <p className="font-bold text-lg">
                 {isCameraActive
-                  ? "Capture Grandma"
+                  ? enrollPhotoStep < 3
+                    ? `Capture step ${enrollPhotoStep}`
+                    : "Capture final photo"
                   : "Start Grandma Enrollment"}
               </p>
+              {isCameraActive && (
+                <p className="text-sm text-sky-800 mt-1 text-center">
+                  3 quick photos for better recognition
+                </p>
+              )}
             </button>
           )}
 
@@ -276,15 +378,22 @@ export default function Home() {
               onClick={() =>
                 isCameraActive
                   ? void captureAndEnroll("grandpa")
-                  : setIsCameraActive(true)
+                  : startCameraWithReset()
               }
               className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
             >
               <p className="font-bold text-lg">
                 {isCameraActive
-                  ? "Capture Grandpa"
+                  ? enrollPhotoStep < 3
+                    ? `Capture step ${enrollPhotoStep}`
+                    : "Capture final photo"
                   : "Start Grandpa Enrollment"}
               </p>
+              {isCameraActive && (
+                <p className="text-sm text-sky-800 mt-1 text-center">
+                  3 quick photos for better recognition
+                </p>
+              )}
             </button>
           )}
 
@@ -295,6 +404,9 @@ export default function Home() {
               className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300"
             >
               <p className="font-bold text-lg">Start Duo Enrollment</p>
+              <p className="text-sm text-sky-800 mt-1 text-center">
+                3 photos each person
+              </p>
             </button>
           )}
 
@@ -305,7 +417,11 @@ export default function Home() {
               onClick={() => void captureAndEnroll("grandma")}
               className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
             >
-              <p className="font-bold text-lg">Capture Grandma</p>
+              <p className="font-bold text-lg">
+                {enrollPhotoStep < 3
+                  ? `Capture Grandma · step ${enrollPhotoStep}`
+                  : "Capture Grandma · final photo"}
+              </p>
             </button>
           )}
 
@@ -316,7 +432,11 @@ export default function Home() {
               onClick={() => void captureAndEnroll("grandpa")}
               className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
             >
-              <p className="font-bold text-lg">Capture Grandpa</p>
+              <p className="font-bold text-lg">
+                {enrollPhotoStep < 3
+                  ? `Capture Grandpa · step ${enrollPhotoStep}`
+                  : "Capture Grandpa · final photo"}
+              </p>
             </button>
           )}
 
