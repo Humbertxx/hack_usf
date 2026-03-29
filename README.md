@@ -48,22 +48,6 @@ flowchart TD
 - **MediaPipe Pose Landmarker (BlazePose heavy)** for pose landmarks
 - **OSNet ReID (torchreid)** for primary subject identity matching
 
-### 2) Demo Insights Pipeline (Snowflake-backed)
-
-```mermaid
-flowchart TD
-  A[Seed Script<br/>backend/scripts/seed_mock_week.py] --> B[RAW_OBSERVATIONS / ALERTS / LIVE_EVENTS<br/>GRANDMA_MONITOR_DEV]
-  B --> C[FastAPI Demo Routes<br/>/api/insights-trends<br/>/api/timeline<br/>/api/insights-chat]
-  C --> D[Next Route Handlers]
-  D --> E[Insights + Timeline UI]
-  C --> F[Snowflake Cortex Complete]
-  F --> E
-```
-
-**Safety model:**
-- Demo-only analytics/chat routes are guarded to **dev DB targets** (`*_DEV`, especially `GRANDMA_MONITOR_DEV`)
-- Production defaults remain unchanged
-
 ---
 
 ## Repository Structure
@@ -74,7 +58,7 @@ flowchart TD
 | `backend/` | FastAPI routers, Snowflake access, demo analytics APIs |
 | `cv/` | CV inference service, models/pipeline, enrollment, identity tracking |
 | `capture/` | Capture scripts, RunPod/SSH helpers |
-| `scripts/` | Dev run helpers (including demo runner) |
+| `scripts/` | Dev run helpers |
 | `infra/` | Deployment/infra utilities |
 | `shared/` | Shared types/contracts |
 
@@ -92,7 +76,7 @@ Optional:
 
 ---
 
-## Quick Start (Demo Analytics + Chat)
+## Quick Start 
 
 This is the fastest way to run the dashboard with seeded mock data and AI analysis.
 
@@ -119,9 +103,9 @@ Create root `.env` (or export vars) with at least:
 SNOWFLAKE_ACCOUNT=...
 SNOWFLAKE_USER=...
 SNOWFLAKE_PASSWORD=...
-SNOWFLAKE_WAREHOUSE=COMPUTE_WH
-SNOWFLAKE_DATABASE=GRANDMA_MONITOR_DEV
-SNOWFLAKE_SCHEMA=PUBLIC
+SNOWFLAKE_WAREHOUSE=...
+SNOWFLAKE_DATABASE=...
+SNOWFLAKE_SCHEMA=...
 # Optional model override for insights chat:
 SNOWFLAKE_CORTEX_MODEL=mistral-large
 ```
@@ -210,7 +194,7 @@ bash cv/scripts/verify_runpod_gpu.sh
 ## Demo/Production Safety Rules
 
 - Demo analytics APIs are **dev DB guarded** and reject production DB names by default.
-- `scripts/run_frontend_snowflake_demo.sh` forces `SNOWFLAKE_DATABASE=GRANDMA_MONITOR_DEV` for its backend process.
+- `scripts/run_frontend_snowflake_demo.sh` forces `SNOWFLAKE_DATABASE=...` for its backend process.
 - Keep normal production/deployment docs under `backend/snowflake/` unchanged for operational flows.
 
 ---
@@ -248,9 +232,6 @@ npm run build
 
 - **Demo pages show unavailable**  
   Open `/demo` first to enable demo session mode.
-
-- **Cortex chat errors**  
-  Verify role permissions for `SNOWFLAKE.CORTEX.COMPLETE` and model availability (`SNOWFLAKE_CORTEX_MODEL`).
 
 ---
 
