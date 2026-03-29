@@ -41,12 +41,15 @@ export default function Home() {
         </div>
         {grandma && (
         <div className="flex flex-wrap justify-between items-center gap-5 w-[90%] md:w-[80%]">
-          <InsightCard />
+          <h2 className="text-2xl font-bold">Grandma</h2>
+          <InsightCard person="grandma" />
         </div> 
         )}
         {grandpa && (
+
           <div className="flex flex-wrap justify-between items-center gap-5 w-[90%] md:w-[80%]">
-            <InsightCard />
+            <h2 className="text-2xl font-bold">Grandpa</h2>
+            <InsightCard person="grandpa"/>
           </div>
         )}
       </div>
