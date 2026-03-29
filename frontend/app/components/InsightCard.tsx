@@ -49,7 +49,7 @@ export default function InsightCard({
 }: InsightCardProps) {
   const [message, setMessage] = useState("");
   const [receivedMessage, setReceivedMessage] = useState(
-    "Insights assistant is available after chat endpoint wiring.",
+    "Ask me anything about your loved ones!",
   );
   const [chatBusy, setChatBusy] = useState(false);
 

@@ -179,8 +179,8 @@ function DashboardInner() {
   const values: basicstatus[] = [
     { type: "Active Hours", val: "8.5" },
     { type: "Sleep Quality", val: "Good" },
-    { type: "Exercise", val: "1" },
-    { type: "Meals", val: "3" },
+    { type: "Exercise", val: "0" },
+    { type: "Meals", val: "0" },
   ];
 
   const fetchLiveEvents = useCallback(async () => {
