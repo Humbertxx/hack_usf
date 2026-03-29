@@ -77,6 +77,46 @@ def test_health(stub_app) -> None:
         assert r.json() == {"status": "ok"}
 
 
+class _SnowflakeLiveEventsStub:
+    def get_recent_live_events(self, *, since_minutes: int = 30, limit: int = 50):
+        return [
+            {
+                "id": "evt-1",
+                "event_type": "eating",
+                "headline": "Lunch",
+                "summary": "Had lunch.",
+                "meal_kind": "lunch",
+                "observed_at": "2026-03-29T12:00:00-04:00",
+                "display_name": "Grandma",
+                "frame_thumb_base64": None,
+            }
+        ]
+
+    def add_observation(self, obs) -> None:
+        pass
+
+    def add_alert(self, alert) -> None:
+        pass
+
+    def flush(self) -> None:
+        pass
+
+
+def test_live_events_reads_from_snowflake_stub() -> None:
+    app = create_app(
+        pipeline_factory=lambda: StubPipeline(),
+        snowflake=_SnowflakeLiveEventsStub(),
+    )
+    with TestClient(app) as client:
+        r = client.get("/api/live-events?minutes=30&limit=10")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["timezone"] == "America/New_York"
+        assert len(body["events"]) == 1
+        assert body["events"][0]["headline"] == "Lunch"
+        assert body["events"][0]["event_type"] == "eating"
+
+
 def test_process_frame_broadcasts_observation(stub_app) -> None:
     app, _ = stub_app
     with TestClient(app) as client:

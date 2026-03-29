@@ -66,6 +66,8 @@ class Observation(BaseModel):
     primary_person_id: Optional[str] = None
     primary_display_name: Optional[str] = None
     primary_identity_confidence: Optional[float] = None
+    # Set only when persisting to Snowflake for eating / fall-risk / fall-alert frames (JPEG base64, see CV main).
+    frame_thumb_base64: Optional[str] = None
 
 
 class Alert(BaseModel):

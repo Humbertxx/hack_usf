@@ -62,6 +62,7 @@ class Observation:
 
     frame_quality: Optional[float] = None
     session_id: Optional[str] = None
+    frame_thumb_base64: Optional[str] = None
 
 
 @dataclass

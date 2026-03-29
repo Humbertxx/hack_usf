@@ -127,6 +127,7 @@ class SnowflakeClient:
             "MINUTES_SINCE_LAST_SEEN": obs.minutes_since_last_seen,
             "FRAME_QUALITY": obs.frame_quality,
             "SESSION_ID": obs.session_id,
+            "FRAME_THUMB_BASE64": obs.frame_thumb_base64,
         }
         self.observation_buffer.append(row)
         
@@ -260,7 +261,75 @@ class SnowflakeClient:
         elapsed = (datetime.now(timezone.utc) - self.last_flush).total_seconds()
         if elapsed > self.FLUSH_INTERVAL_SECONDS and self.observation_buffer:
             self.flush()
-    
+
+    def get_recent_live_events(
+        self,
+        *,
+        since_minutes: int = 30,
+        limit: int = 50,
+    ) -> List[dict]:
+        """
+        Rows from LIVE_EVENTS joined to RAW_OBSERVATIONS for frame thumbnails.
+        OBSERVED_AT is NTZ US Eastern wall time; returned ISO strings use offset for that zone.
+
+        Args:
+            since_minutes: Only events with OBSERVED_AT >= now - this many minutes (session TZ).
+            limit: Max rows (most recent first).
+        """
+        since_minutes = max(1, min(int(since_minutes), 60 * 24 * 7))
+        limit = max(1, min(int(limit), 200))
+
+        def _ntz_row_to_iso(dt: Any) -> Optional[str]:
+            if dt is None:
+                return None
+            if not isinstance(dt, datetime):
+                return None
+            # NTZ values are stored as America/New_York local wall time.
+            naive = dt.replace(tzinfo=None) if dt.tzinfo else dt
+            aware = naive.replace(tzinfo=_US_EASTERN)
+            return aware.isoformat()
+
+        sql = """
+            SELECT
+                e.ID,
+                e.EVENT_TYPE,
+                e.HEADLINE,
+                e.SUMMARY,
+                e.MEAL_KIND,
+                e.OBSERVED_AT,
+                e.PRIMARY_DISPLAY_NAME,
+                r.FRAME_THUMB_BASE64
+            FROM LIVE_EVENTS e
+            INNER JOIN RAW_OBSERVATIONS r ON r.ID = e.OBSERVATION_ID
+            WHERE e.OBSERVED_AT >= DATEADD('minute', -%s, CURRENT_TIMESTAMP())
+            ORDER BY e.OBSERVED_AT DESC
+            LIMIT %s
+        """
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(sql, (since_minutes, limit))
+            columns = [c[0].lower() for c in cursor.description or []]
+            rows = cursor.fetchall()
+        finally:
+            cursor.close()
+
+        out: List[dict] = []
+        for row in rows:
+            d = dict(zip(columns, row))
+            out.append(
+                {
+                    "id": d.get("id"),
+                    "event_type": d.get("event_type"),
+                    "headline": d.get("headline"),
+                    "summary": d.get("summary"),
+                    "meal_kind": d.get("meal_kind"),
+                    "observed_at": _ntz_row_to_iso(d.get("observed_at")),
+                    "display_name": d.get("primary_display_name"),
+                    "frame_thumb_base64": d.get("frame_thumb_base64"),
+                }
+            )
+        return out
+
     def close(self) -> None:
         """Flush remaining data and close connection."""
         self.flush()
