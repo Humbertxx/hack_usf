@@ -13,7 +13,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 
 const LIVE_EVENTS_TZ = "America/New_York";
-const POLL_MS = 5_000;
+const LIVE_EVENTS_POLL_MS = 3_000;
+const PRIMARY_STATE_POLL_MS = 1_000;
 
 type LiveEventItem = {
   id: string | null;
@@ -213,13 +214,21 @@ function DashboardInner() {
 
   useEffect(() => {
     void fetchLiveEvents();
-    void fetchPrimaryState();
-    const id = window.setInterval(() => {
-      void fetchLiveEvents();
-      void fetchPrimaryState();
-    }, POLL_MS);
+    const id = window.setInterval(
+      () => void fetchLiveEvents(),
+      LIVE_EVENTS_POLL_MS,
+    );
     return () => window.clearInterval(id);
-  }, [fetchLiveEvents, fetchPrimaryState]);
+  }, [fetchLiveEvents]);
+
+  useEffect(() => {
+    void fetchPrimaryState();
+    const id = window.setInterval(
+      () => void fetchPrimaryState(),
+      PRIMARY_STATE_POLL_MS,
+    );
+    return () => window.clearInterval(id);
+  }, [fetchPrimaryState]);
 
   const syncLabel = lastSyncedAt
     ? new Intl.DateTimeFormat("en-US", {
@@ -275,7 +284,7 @@ function DashboardInner() {
         <SectionHeader
           id="presence-heading"
           title="Right now"
-          description={`Updates every 5 sec · ${eventsTz.replace("_", " ")}`}
+          description={`Updates every 1 sec · ${eventsTz.replace("_", " ")}`}
         />
         {primaryError ? (
           <Card
@@ -327,7 +336,7 @@ function DashboardInner() {
         <SectionHeader
           id="live-heading"
           title="Live Updates"
-          description={`Transitions & alerts · every 5 sec · ${eventsTz.replace("_", " ")}`}
+          description={`Transitions & alerts · every 3 sec · ${eventsTz.replace("_", " ")}`}
         />
 
         {eventsError ? (

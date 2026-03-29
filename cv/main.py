@@ -53,6 +53,23 @@ def _min_identity_confidence() -> float:
         return 0.58
 
 
+def _fall_min_pose_confidence() -> float:
+    """Minimum pose confidence to treat a fall alert as real for UI, Snowflake, and WS."""
+    raw = os.environ.get("CV_FALL_MIN_POSE_CONFIDENCE", "0.72").strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.72
+
+
+def _is_confirmed_fall(obs: Observation, alert: Optional[Alert]) -> bool:
+    if alert is None or alert.alert_type != "fall_detected":
+        return False
+    if obs.pose != PoseType.LYING:
+        return False
+    return obs.pose_confidence >= _fall_min_pose_confidence()
+
+
 def _load_runtime_env() -> None:
     """
     Load likely env files for local development without overriding exported vars.
@@ -126,11 +143,19 @@ def _encode_frame_thumbnail_bgr(frame: np.ndarray) -> Optional[str]:
     return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
-def _should_persist_thumbnail(obs: Observation, alert: Optional[Alert]) -> bool:
-    if alert is not None and alert.alert_type == "fall_detected":
+def _should_persist_thumbnail(
+    obs: Observation,
+    alert: Optional[Alert],
+    *,
+    confirmed_fall: bool,
+) -> bool:
+    if confirmed_fall:
         return True
     if obs.is_fall_risk:
-        return True
+        return (
+            obs.pose == PoseType.LYING
+            and obs.pose_confidence >= _fall_min_pose_confidence()
+        )
     if obs.activity == ActivityType.EATING:
         return True
     if obs.activity == ActivityType.DRINKING:
@@ -259,6 +284,7 @@ def create_app(
     app.state.reid_embedder: Optional[ReIDEmbedder] = None
     app.state.live_event_buffer = deque(maxlen=LIVE_EVENT_BUFFER_MAX)
     app.state.last_primary_snapshot: Optional[Dict[str, Any]] = None
+    app.state.fall_attention_latched = False
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -325,8 +351,10 @@ def create_app(
 
         prev = app.state.prev_sent
         alert = app.state.alert_engine.check(obs)
+        confirmed_fall = _is_confirmed_fall(obs, alert)
+
         thumb_b64: Optional[str] = None
-        if _should_persist_thumbnail(obs, alert):
+        if _should_persist_thumbnail(obs, alert, confirmed_fall=confirmed_fall):
             thumb_b64 = _encode_frame_thumbnail_bgr(frame)
         obs_to_store = (
             obs.model_copy(update={"frame_thumb_base64": thumb_b64})
@@ -335,7 +363,7 @@ def create_app(
         )
 
         records: List[Dict[str, Any]] = collect_transition_events(prev, obs)
-        if alert is not None and alert.alert_type == "fall_detected":
+        if confirmed_fall:
             records.append(
                 {
                     "dedupe_key": DEDUPE_FALLEN,
@@ -343,6 +371,18 @@ def create_app(
                     "headline": alert.quick_message or "Possible fall detected",
                 }
             )
+
+        if confirmed_fall:
+            app.state.fall_attention_latched = True
+        if obs.pose in (PoseType.STANDING, PoseType.WALKING, PoseType.SITTING):
+            app.state.fall_attention_latched = False
+
+        min_fall_conf = _fall_min_pose_confidence()
+        fallen_attention = (
+            app.state.fall_attention_latched
+            and obs.pose == PoseType.LYING
+            and obs.pose_confidence >= min_fall_conf
+        )
 
         buf: Deque[dict[str, Any]] = app.state.live_event_buffer
         obs_iso = _observed_at_iso(obs)
@@ -370,8 +410,7 @@ def create_app(
             "observed_at": obs_iso,
             "session_id": obs.session_id,
             "activity": act_val,
-            "fallen_attention": obs.pose == PoseType.LYING
-            or (alert is not None and alert.alert_type == "fall_detected"),
+            "fallen_attention": fallen_attention,
         }
 
         app.state.prev_sent = obs
@@ -381,10 +420,15 @@ def create_app(
         alert_json: Optional[dict[str, Any]] = None
         if alert is not None:
             if alert.alert_type == "fall_detected":
-                app.state.snowflake.add_alert(alert)
-            app.state.ws_manager.register_alert(alert)
-            await app.state.ws_manager.broadcast_alert(alert)
-            alert_json = alert.model_dump(mode="json")
+                if confirmed_fall:
+                    app.state.snowflake.add_alert(alert)
+                    app.state.ws_manager.register_alert(alert)
+                    await app.state.ws_manager.broadcast_alert(alert)
+                    alert_json = alert.model_dump(mode="json")
+            else:
+                app.state.ws_manager.register_alert(alert)
+                await app.state.ws_manager.broadcast_alert(alert)
+                alert_json = alert.model_dump(mode="json")
 
         app.state.snowflake.flush()
 
