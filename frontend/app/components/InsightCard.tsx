@@ -29,6 +29,10 @@ type InsightCardProps = {
   trends: TrendRow[];
   loading: boolean;
   error: string | null;
+  dataUnavailable?: boolean;
+  dataUnavailableMessage?: string;
+  chatEnabled?: boolean;
+  chatDisabledMessage?: string;
 };
 
 export default function InsightCard({
@@ -38,6 +42,10 @@ export default function InsightCard({
   trends,
   loading,
   error,
+  dataUnavailable = false,
+  dataUnavailableMessage = "Insights are unavailable.",
+  chatEnabled = true,
+  chatDisabledMessage = "Insights chat is currently unavailable.",
 }: InsightCardProps) {
   const [message, setMessage] = useState("");
   const [receivedMessage, setReceivedMessage] = useState(
@@ -61,20 +69,20 @@ export default function InsightCard({
     {
       key: "meals",
       name: "Meals/day",
-      measurement: `${avgMeals.toFixed(1)}/day`,
-      description: `${totalMeals} meals across 7 days`,
+      measurement: dataUnavailable ? "--" : `${avgMeals.toFixed(1)}/day`,
+      description: dataUnavailable ? "Demo mode required" : `${totalMeals} meals across 7 days`,
     },
     {
       key: "falls",
       name: "Falls/day",
-      measurement: `${totalFalls}`,
-      description: "Total fall alerts in this window",
+      measurement: dataUnavailable ? "--" : `${totalFalls}`,
+      description: dataUnavailable ? "Demo mode required" : "Total fall alerts in this window",
     },
     {
       key: "activity",
       name: "Activity level",
-      measurement: `${Math.round(avgActivity)}/100`,
-      description: "Daily active-pose score",
+      measurement: dataUnavailable ? "--" : `${Math.round(avgActivity)}/100`,
+      description: dataUnavailable ? "Demo mode required" : "Daily active-pose score",
     },
   ];
 
@@ -111,10 +119,14 @@ export default function InsightCard({
             />
             <button
               type="button"
-              disabled={chatBusy}
+              disabled={chatBusy || !chatEnabled}
               onClick={async () => {
                 const trimmed = message.trim();
                 if (!trimmed) return;
+                if (!chatEnabled) {
+                  setReceivedMessage(chatDisabledMessage);
+                  return;
+                }
                 setChatBusy(true);
                 try {
                   const response = await fetch("/api/insights-chat", {
@@ -158,8 +170,11 @@ export default function InsightCard({
               metric === item.key
                 ? "bg-[var(--surface-muted)] ring-emerald-600/30"
                 : ""
-            }`}
-            onClick={() => setMetric(item.key)}
+            } ${dataUnavailable ? "cursor-not-allowed opacity-70" : ""}`}
+            onClick={() => {
+              if (dataUnavailable) return;
+              setMetric(item.key);
+            }}
           >
             <p className="text-sm font-medium uppercase tracking-wide text-neutral-500">
               {item.name}
@@ -174,7 +189,11 @@ export default function InsightCard({
           hover={false}
           className="h-[400px] min-h-[400px] w-full min-w-0 overflow-hidden p-3 md:p-4"
         >
-          {loading && chartData.length === 0 ? (
+          {dataUnavailable ? (
+            <div className="flex h-full items-center justify-center text-neutral-500">
+              {dataUnavailableMessage}
+            </div>
+          ) : loading && chartData.length === 0 ? (
             <div className="flex h-full items-center justify-center text-neutral-500">
               Loading weekly trends...
             </div>
