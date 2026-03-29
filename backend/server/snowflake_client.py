@@ -1,18 +1,39 @@
 import os
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, List, Optional
 from zoneinfo import ZoneInfo
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
 from snowflake.connector.constants import PARAMETER_PYTHON_CONNECTOR_QUERY_RESULT_FORMAT
 import pandas as pd
-from models import Observation, Alert
-from config import MAX_LIMIT
+from dotenv import load_dotenv
+
+try:
+    from backend.config import MAX_LIMIT
+    from backend.models import Alert, Observation
+except ImportError:  # Backward-compatible fallback for backend-only execution.
+    from models import Observation, Alert
+    from config import MAX_LIMIT
 
 # remember init in class is related to .env
 
 _US_EASTERN = ZoneInfo("America/New_York")
+
+
+def _load_runtime_env() -> None:
+    """
+    Load likely env files for backend execution without overriding exported vars.
+
+    This mirrors the CV app behavior so the repository-level FastAPI app can be
+    started from the repo root and still find Snowflake credentials in common
+    local development locations.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    load_dotenv(repo_root / ".env")
+    load_dotenv(repo_root / "backend" / ".env.humberto")
+    load_dotenv(repo_root / "backend" / ".env")
 
 
 def _to_us_eastern_naive(dt: datetime) -> datetime:
@@ -61,8 +82,17 @@ def _decode_variant_list(value: Any) -> list[str]:
     return [str(value)]
 
 
+def _ntz_row_to_iso(dt: Any) -> Optional[str]:
+    if dt is None or not isinstance(dt, datetime):
+        return None
+    naive = dt.replace(tzinfo=None) if dt.tzinfo else dt
+    aware = naive.replace(tzinfo=_US_EASTERN)
+    return aware.isoformat()
+
+
 class SnowflakeClient:
     def __init__(self):
+        _load_runtime_env()
         self.conn = snowflake.connector.connect(
             account=os.getenv('SNOWFLAKE_ACCOUNT'),
             user=os.getenv('SNOWFLAKE_USER'),
@@ -247,6 +277,90 @@ class SnowflakeClient:
             """, (limit,), _statement_params={PARAMETER_PYTHON_CONNECTOR_QUERY_RESULT_FORMAT: "JSON"})
             columns = [col[0] for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        finally:
+            cursor.close()
+
+    def get_recent_live_events(
+        self,
+        *,
+        since_minutes: int = 30,
+        limit: int = 50,
+    ) -> List[dict]:
+        """
+        Read live-feed rows using the repository Snowflake schema.
+
+        Returns the same API-facing shape used by the CV service so callers can
+        adopt the backend reader without changing the existing frontend contract.
+        """
+        since_minutes = max(1, min(int(since_minutes), 60 * 24 * 7))
+        limit = max(1, min(int(limit), 200))
+
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT
+                    e.ID,
+                    e.EVENT_TYPE,
+                    e.HEADLINE,
+                    e.SUMMARY,
+                    e.MEAL_KIND,
+                    e.OBSERVED_AT,
+                    e.PRIMARY_DISPLAY_NAME,
+                    r.FRAME_THUMB_BASE64
+                FROM LIVE_EVENTS e
+                INNER JOIN RAW_OBSERVATIONS r ON r.ID = e.OBSERVATION_ID
+                WHERE e.OBSERVED_AT >= DATEADD('minute', -%s, CURRENT_TIMESTAMP())
+                ORDER BY e.OBSERVED_AT DESC
+                LIMIT %s
+            """, (since_minutes, limit))
+            columns = [col[0].lower() for col in cursor.description or []]
+            rows = cursor.fetchall()
+        finally:
+            cursor.close()
+
+        events: List[dict] = []
+        for row in rows:
+            record = dict(zip(columns, row))
+            events.append(
+                {
+                    "id": record.get("id"),
+                    "event_type": record.get("event_type"),
+                    "headline": record.get("headline"),
+                    "summary": record.get("summary"),
+                    "meal_kind": record.get("meal_kind"),
+                    "observed_at": _ntz_row_to_iso(record.get("observed_at")),
+                    "display_name": record.get("primary_display_name"),
+                    "frame_thumb_base64": record.get("frame_thumb_base64"),
+                }
+            )
+        return events
+
+    def get_recent_enriched_observations(self, limit: int = MAX_LIMIT) -> List[dict]:
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute("""
+                SELECT
+                    e.ID,
+                    e.OBSERVATION_ID,
+                    TO_VARCHAR(e.ENRICHED_AT) AS ENRICHED_AT,
+                    e.NATURAL_DESCRIPTION,
+                    e.WELLNESS_SCORE,
+                    e.CONCERN_FLAGS,
+                    e.IS_DAILY_SUMMARY,
+                    o.PRIMARY_PERSON_ID,
+                    o.PRIMARY_DISPLAY_NAME,
+                    TO_VARCHAR(o.OBSERVED_AT) AS OBSERVED_AT
+                FROM ENRICHED_OBSERVATIONS e
+                LEFT JOIN RAW_OBSERVATIONS o ON o.ID = e.OBSERVATION_ID
+                WHERE e.IS_DAILY_SUMMARY = FALSE
+                ORDER BY e.ENRICHED_AT DESC
+                LIMIT %s
+            """, (limit,), _statement_params={PARAMETER_PYTHON_CONNECTOR_QUERY_RESULT_FORMAT: "JSON"})
+            columns = [col[0] for col in cursor.description]
+            rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            for row in rows:
+                row["CONCERN_FLAGS"] = _decode_variant_list(row.get("CONCERN_FLAGS"))
+            return rows
         finally:
             cursor.close()
 

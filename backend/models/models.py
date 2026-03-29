@@ -47,6 +47,10 @@ class Observation:
     observed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     person_detected: bool = False
+    primary_person_id: Optional[str] = None
+    primary_display_name: Optional[str] = None
+    primary_identity_confidence: Optional[float] = None
+
     pose: Optional[PoseType | str] = None
     pose_confidence: Optional[float] = None
 

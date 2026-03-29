@@ -7,7 +7,7 @@ Hackathon project for 2026 Hack USF.
 | Area | Role |
 |------|------|
 | **`frontend/`** | Next.js 16 app. Dev server on port **3000**. The enrollment UI talks to the CV API via Next **Route Handlers** (for example `app/api/enroll/route.ts` forwards `POST` to the CV server so the browser avoids CORS issues). Those handlers default to **`http://localhost:8080`**. |
-| **`backend/`** | FastAPI-oriented modules (API shapes, models, Snowflake client, WebSocket helpers). There is **no separate “run the backend”** process in this repo yet; the **live HTTP API for enrollment and subjects is the CV app** in `cv/main.py`. |
+| **`backend/`** | FastAPI-oriented modules (API shapes, models, Snowflake client, WebSocket helpers). The repository now has a root **`app.py`** that mounts backend routes and websockets, with optional CV mounting under **`/cv`** if CV dependencies import successfully. |
 | **`cv/`** | Computer vision pipeline and **FastAPI** app (`cv.main:app`): `/health`, `/enroll-subject`, `/subjects`, WebSocket `/ws`, etc. Dependencies in `cv/requirements.txt`; tests and GPU scripts under `cv/`. |
 
 Other top-level folders (not exhaustive): **`capture/`** — Pi capture and RunPod/SSH helpers; **`shared/`** — types for frontend/backend; **`infra/`**, **`data/`**, **`scripts/`** — deployment and dev utilities.
@@ -18,6 +18,33 @@ CV tests expect imports from the repo root (`pythonpath` = repo root):
 pip install -r cv/requirements-dev.txt
 cd cv && python -m pytest
 ```
+
+---
+
+## Run the unified FastAPI app
+
+From the **repository root**:
+
+```bash
+cd /path/to/hack_usf
+
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
+pip install --upgrade pip
+pip install -r backend/requirements.txt
+
+uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+Useful endpoints:
+
+- `GET /health`
+- `GET /api/observations`
+- `GET /api/alerts`
+- `GET /api/live-events`
+- `WS /ws/live`
+- `GET /cv/health` if the CV app mounted successfully
 
 ---
 

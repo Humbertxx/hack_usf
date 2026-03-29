@@ -2,8 +2,12 @@ from typing import Dict, List
 
 from fastapi import APIRouter, Query
 
-from config import DEFAULT_LIMIT, MAX_LIMIT
-from server.snowflake_client import SnowflakeClient
+try:
+    from backend.config import DEFAULT_LIMIT, MAX_LIMIT
+    from backend.server.snowflake_client import SnowflakeClient
+except ImportError:  # Backward-compatible fallback for backend-only execution.
+    from config import DEFAULT_LIMIT, MAX_LIMIT
+    from server.snowflake_client import SnowflakeClient
 
 router = APIRouter(prefix="/api/observations", tags=["observations"])
 
