@@ -26,3 +26,17 @@ uvicorn app:app --reload --host 0.0.0.0 --port 8000
 - ws: WebSocket handlers and realtime broadcast
 - config: environment and config templates
 - scripts: dev helpers (seed, run, smoke tests)
+
+## Demo Snowflake seeding (dev only)
+
+Use the non-production dev database when seeding weekly mock rows:
+
+```bash
+SNOWFLAKE_DATABASE=GRANDMA_MONITOR_DEV python -m backend.scripts.seed_mock_week --include-grandpa --days 7
+```
+
+## Insights chat env notes (dev demo)
+
+- Route: `POST /api/insights-chat`
+- Snowflake guard: route refuses non-dev DBs unless emergency env `ALLOW_NON_DEV_SNOWFLAKE_FOR_INSIGHTS` is set.
+- Cortex model env: `SNOWFLAKE_CORTEX_MODEL` (default: `mistral-large`).

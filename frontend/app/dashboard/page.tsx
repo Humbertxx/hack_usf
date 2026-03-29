@@ -5,6 +5,9 @@ import { EventRow } from "@/app/components/EventRow";
 import { SectionHeader } from "@/app/components/SectionHeader";
 import { StatusBadge } from "@/app/components/StatusBadge";
 import {
+  isHackUsfDemoSession,
+} from "@/lib/demo-session";
+import {
   DASHBOARD_FULL_STACK_FIRED_KEY,
   ENROLLMENT_QUERY,
   ENROLLMENT_VALUE,
@@ -14,7 +17,21 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 
 const LIVE_EVENTS_TZ = "America/New_York";
 const LIVE_EVENTS_POLL_MS = 3_000;
+/** Demo mode: seven-day lookback so seeded LIVE_EVENTS remain visible. */
+const DEMO_LIVE_EVENTS_LOOKBACK_MINUTES = 10_080;
+const DEMO_LIVE_EVENTS_POLL_MIN_MS = 2_000;
+const DEMO_LIVE_EVENTS_POLL_MAX_MS = 5_000;
 const PRIMARY_STATE_POLL_MS = 1_000;
+
+function demoLiveEventsPollDelayMs(): number {
+  return (
+    DEMO_LIVE_EVENTS_POLL_MIN_MS +
+    Math.floor(
+      Math.random() *
+        (DEMO_LIVE_EVENTS_POLL_MAX_MS - DEMO_LIVE_EVENTS_POLL_MIN_MS + 1),
+    )
+  );
+}
 
 type LiveEventItem = {
   id: string | null;
@@ -168,7 +185,10 @@ function DashboardInner() {
 
   const fetchLiveEvents = useCallback(async () => {
     try {
-      const r = await fetch("/api/live-events?minutes=30&limit=50", {
+      const minutes = isHackUsfDemoSession()
+        ? DEMO_LIVE_EVENTS_LOOKBACK_MINUTES
+        : 30;
+      const r = await fetch(`/api/live-events?minutes=${minutes}&limit=50`, {
         cache: "no-store",
       });
       const data: LiveEventsPayload = await r.json();
@@ -214,11 +234,23 @@ function DashboardInner() {
 
   useEffect(() => {
     void fetchLiveEvents();
-    const id = window.setInterval(
-      () => void fetchLiveEvents(),
-      LIVE_EVENTS_POLL_MS,
-    );
-    return () => window.clearInterval(id);
+
+    if (!isHackUsfDemoSession()) {
+      const id = window.setInterval(
+        () => void fetchLiveEvents(),
+        LIVE_EVENTS_POLL_MS,
+      );
+      return () => window.clearInterval(id);
+    }
+
+    let timeoutId = 0;
+    const schedule = () => {
+      timeoutId = window.setTimeout(() => {
+        void fetchLiveEvents().finally(schedule);
+      }, demoLiveEventsPollDelayMs());
+    };
+    schedule();
+    return () => window.clearTimeout(timeoutId);
   }, [fetchLiveEvents]);
 
   useEffect(() => {
@@ -238,6 +270,8 @@ function DashboardInner() {
         second: "2-digit",
       }).format(lastSyncedAt)
     : null;
+
+  const demoMode = isHackUsfDemoSession();
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-8 px-6 py-10">
@@ -336,7 +370,11 @@ function DashboardInner() {
         <SectionHeader
           id="live-heading"
           title="Live Updates"
-          description={`Transitions & alerts · every 3 sec · ${eventsTz.replace("_", " ")}`}
+          description={
+            demoMode
+              ? `Transitions & alerts · ~2–5 sec (demo) · ${eventsTz.replace("_", " ")}`
+              : `Transitions & alerts · every 3 sec · ${eventsTz.replace("_", " ")}`
+          }
         />
 
         {eventsError ? (

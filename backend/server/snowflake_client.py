@@ -2,7 +2,7 @@ import os
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
@@ -88,6 +88,55 @@ def _ntz_row_to_iso(dt: Any) -> Optional[str]:
     naive = dt.replace(tzinfo=None) if dt.tzinfo else dt
     aware = naive.replace(tzinfo=_US_EASTERN)
     return aware.isoformat()
+
+
+def observed_at_cell_to_iso(value: Any) -> Optional[str]:
+    """Normalize Snowflake OBSERVED_AT (VARCHAR or TIMESTAMP) to ISO-8601 Eastern."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return _ntz_row_to_iso(value)
+    s = str(value).strip()
+    if not s:
+        return None
+    if "T" in s and len(s) >= 19:
+        return s
+    base = s.split(".")[0][:19]
+    try:
+        naive = datetime.strptime(base, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return s
+    return naive.replace(tzinfo=_US_EASTERN).isoformat()
+
+
+def _extract_cortex_text(raw: Any) -> str:
+    """
+    Normalize Snowflake Cortex COMPLETE output into a plain assistant response.
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, dict):
+        choices = raw.get("choices")
+        if isinstance(choices, list) and choices:
+            first = choices[0]
+            if isinstance(first, dict):
+                msg = first.get("messages") or first.get("message") or first.get("text")
+                if isinstance(msg, str):
+                    return msg.strip()
+        content = raw.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        return json.dumps(raw)
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return ""
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError:
+            return text
+        return _extract_cortex_text(decoded)
+    return str(raw)
 
 
 class SnowflakeClient:
@@ -408,6 +457,7 @@ class SnowflakeClient:
                     DATEDIFF('minute', OBSERVED_AT, CURRENT_TIMESTAMP()) AS MINUTES_AGO,
                     POSE,
                     ACTIVITY,
+                    SESSION_ID,
                     ROOM_HINT,
                     MOTION_LEVEL,
                     IS_FALL_RISK,
@@ -434,6 +484,7 @@ class SnowflakeClient:
                 "minutes_ago": record.get("MINUTES_AGO"),
                 "pose": record.get("POSE"),
                 "activity": record.get("ACTIVITY"),
+                "session_id": record.get("SESSION_ID"),
                 "room_hint": record.get("ROOM_HINT"),
                 "motion_level": record.get("MOTION_LEVEL"),
                 "is_fall_risk": record.get("IS_FALL_RISK"),
@@ -471,6 +522,274 @@ class SnowflakeClient:
             }
         finally:
             cursor.close()
+
+    def get_insights_trends(
+        self,
+        *,
+        person_id: str,
+        days: int,
+    ) -> List[dict]:
+        """
+        Daily aggregates for insights charts: meals (eating activity), falls (alerts),
+        activity level 0-100 from pose counts. Days are US Eastern calendar days
+        (session TIMEZONE). Returns oldest-to-newest rows aligned to a day spine.
+        """
+        days = max(1, min(int(days), 7))
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(
+                """
+                WITH spine AS (
+                    SELECT DATEADD('day', -seq, CURRENT_DATE()) AS day_dt
+                    FROM (SELECT SEQ4() AS seq FROM TABLE(GENERATOR(ROWCOUNT => %s)))
+                ),
+                obs_daily AS (
+                    SELECT
+                        DATE(OBSERVED_AT) AS day_dt,
+                        SUM(IFF(LOWER(ACTIVITY) = 'eating', 1, 0)) AS meals,
+                        SUM(IFF(LOWER(POSE) IN ('standing', 'walking'), 1, 0)) AS active_cnt,
+                        SUM(IFF(LOWER(POSE) IN ('sitting', 'lying'), 1, 0)) AS sedentary_cnt
+                    FROM RAW_OBSERVATIONS
+                    WHERE PRIMARY_PERSON_ID = %s
+                      AND DATE(OBSERVED_AT) >= (SELECT MIN(day_dt) FROM spine)
+                      AND DATE(OBSERVED_AT) <= (SELECT MAX(day_dt) FROM spine)
+                    GROUP BY 1
+                ),
+                falls_daily AS (
+                    SELECT
+                        DATE(a.TRIGGERED_AT) AS day_dt,
+                        COUNT(*) AS falls
+                    FROM ALERTS a
+                    INNER JOIN RAW_OBSERVATIONS o ON o.ID = a.OBSERVATION_ID
+                    WHERE o.PRIMARY_PERSON_ID = %s
+                      AND a.ALERT_TYPE = 'fall_detected'
+                      AND DATE(a.TRIGGERED_AT) >= (SELECT MIN(day_dt) FROM spine)
+                      AND DATE(a.TRIGGERED_AT) <= (SELECT MAX(day_dt) FROM spine)
+                    GROUP BY 1
+                )
+                SELECT
+                    s.day_dt,
+                    COALESCE(o.meals, 0) AS meals,
+                    COALESCE(f.falls, 0) AS falls,
+                    COALESCE(
+                        ROUND(
+                            100 * COALESCE(o.active_cnt, 0)
+                            / NULLIF(COALESCE(o.active_cnt, 0) + COALESCE(o.sedentary_cnt, 0), 0)
+                        ),
+                        0
+                    ) AS activity_level
+                FROM spine s
+                LEFT JOIN obs_daily o ON o.day_dt = s.day_dt
+                LEFT JOIN falls_daily f ON f.day_dt = s.day_dt
+                ORDER BY s.day_dt
+                """,
+                (days, person_id, person_id),
+            )
+            columns = [col[0].lower() for col in cursor.description or []]
+            rows = cursor.fetchall()
+        finally:
+            cursor.close()
+
+        out: List[dict] = []
+        for row in rows:
+            rec = dict(zip(columns, row))
+            day_val = rec.get("day_dt")
+            if day_val is None:
+                continue
+            if hasattr(day_val, "isoformat"):
+                date_str = day_val.isoformat()
+            else:
+                date_str = str(day_val)[:10]
+            dt_eastern = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=_US_EASTERN)
+            label_short = dt_eastern.strftime("%m/%d")
+            label_dow = dt_eastern.strftime("%a")
+            out.append(
+                {
+                    "date": date_str,
+                    "label": f"{label_dow} {label_short}",
+                    "meals_per_day": int(rec.get("meals") or 0),
+                    "falls_per_day": int(rec.get("falls") or 0),
+                    "activity_level": int(rec.get("activity_level") or 0),
+                }
+            )
+        return out
+
+    def get_timeline_items(
+        self,
+        *,
+        person_id: str,
+        range_key: str,
+        limit: int = 250,
+    ) -> List[dict]:
+        """
+        Return chronological timeline rows for one subject and range.
+
+        Range values:
+          - today: current US Eastern date
+          - yesterday: previous US Eastern date
+          - week: current date and previous 6 days
+        """
+        normalized_range = (range_key or "").strip().lower()
+        if normalized_range not in {"today", "yesterday", "week"}:
+            normalized_range = "today"
+        limit = max(1, min(int(limit), 500))
+
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    o.OBSERVED_AT AS observed_at,
+                    COALESCE(e.EVENT_TYPE, a.ALERT_TYPE, 'observation') AS event_type,
+                    COALESCE(
+                        e.HEADLINE,
+                        IFF(
+                            a.ALERT_TYPE = 'fall_detected',
+                            o.PRIMARY_DISPLAY_NAME || ': possible fall detected',
+                            INITCAP(REPLACE(o.POSE, '_', ' ')) || ' - ' || INITCAP(REPLACE(o.ACTIVITY, '_', ' '))
+                        )
+                    ) AS title,
+                    COALESCE(
+                        e.SUMMARY,
+                        a.QUICK_MESSAGE,
+                        o.PRIMARY_DISPLAY_NAME || ' observed in ' || REPLACE(o.ROOM_HINT, '_', ' ')
+                    ) AS summary
+                FROM RAW_OBSERVATIONS o
+                LEFT JOIN LIVE_EVENTS e ON e.OBSERVATION_ID = o.ID
+                LEFT JOIN ALERTS a
+                  ON a.OBSERVATION_ID = o.ID
+                 AND a.ALERT_TYPE = 'fall_detected'
+                WHERE o.PRIMARY_PERSON_ID = %s
+                  AND (
+                        (%s = 'today' AND DATE(o.OBSERVED_AT) = CURRENT_DATE())
+                     OR (%s = 'yesterday' AND DATE(o.OBSERVED_AT) = DATEADD('day', -1, CURRENT_DATE()))
+                     OR (
+                            %s = 'week'
+                        AND DATE(o.OBSERVED_AT) >= DATEADD('day', -6, CURRENT_DATE())
+                        AND DATE(o.OBSERVED_AT) <= CURRENT_DATE()
+                     )
+                  )
+                ORDER BY o.OBSERVED_AT ASC
+                LIMIT %s
+                """,
+                (person_id, normalized_range, normalized_range, normalized_range, limit),
+            )
+            rows = cursor.fetchall()
+            columns = [col[0].lower() for col in cursor.description or []]
+        finally:
+            cursor.close()
+
+        items: List[dict] = []
+        for row in rows:
+            record = dict(zip(columns, row))
+            observed_at = record.get("observed_at")
+            iso_value = _ntz_row_to_iso(observed_at)
+            display_time = ""
+            if isinstance(observed_at, datetime):
+                display_time = observed_at.strftime("%I:%M %p").lstrip("0")
+            elif iso_value:
+                display_time = iso_value[11:16]
+            items.append(
+                {
+                    "observed_at": iso_value,
+                    "time": display_time,
+                    "event_type": str(record.get("event_type") or "observation").lower(),
+                    "title": str(record.get("title") or "Activity update"),
+                    "summary": str(record.get("summary") or ""),
+                }
+            )
+        return items
+
+    def get_recent_live_event_headlines(
+        self,
+        *,
+        person_id: str,
+        limit: int = 8,
+    ) -> List[dict]:
+        limit = max(1, min(int(limit), 20))
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    EVENT_TYPE,
+                    HEADLINE,
+                    OBSERVED_AT
+                FROM LIVE_EVENTS
+                WHERE PRIMARY_PERSON_ID = %s
+                  AND DATE(OBSERVED_AT) >= DATEADD('day', -6, CURRENT_DATE())
+                ORDER BY OBSERVED_AT DESC
+                LIMIT %s
+                """,
+                (person_id, limit),
+            )
+            rows = cursor.fetchall()
+            columns = [col[0].lower() for col in cursor.description or []]
+        finally:
+            cursor.close()
+
+        out: List[dict] = []
+        for row in rows:
+            rec = dict(zip(columns, row))
+            out.append(
+                {
+                    "event_type": str(rec.get("event_type") or ""),
+                    "headline": str(rec.get("headline") or ""),
+                    "observed_at": _ntz_row_to_iso(rec.get("observed_at")),
+                }
+            )
+        return out
+
+    def complete_insights_chat(
+        self,
+        *,
+        person_id: str,
+        user_message: str,
+        model: str,
+    ) -> Dict[str, Any]:
+        weekly_trends = self.get_insights_trends(person_id=person_id, days=7)
+        recent_headlines = self.get_recent_live_event_headlines(person_id=person_id, limit=8)
+        context_payload = {
+            "timezone": "America/New_York",
+            "person_id": person_id,
+            "activity_level_formula": (
+                "activity_level = round(100 * active / (active + sedentary)), "
+                "active poses: standing/walking, sedentary poses: sitting/lying."
+            ),
+            "weekly_trends": weekly_trends,
+            "recent_live_event_headlines": recent_headlines,
+        }
+        context_json = json.dumps(context_payload, separators=(",", ":"))
+
+        prompt = (
+            "You are an elder care insights assistant. "
+            "Use ONLY the provided JSON context. "
+            "If context is missing, say you are unsure. "
+            "Cite specific day labels and values when making claims. "
+            "Keep response concise, supportive, and factual.\n\n"
+            f"Context JSON:\n{context_json}\n\n"
+            f"User question:\n{user_message.strip()}"
+        )
+
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT SNOWFLAKE.CORTEX.COMPLETE(%s, %s) AS RESPONSE
+                """,
+                (model, prompt),
+            )
+            row = cursor.fetchone()
+            raw = row[0] if row else None
+        finally:
+            cursor.close()
+
+        reply = _extract_cortex_text(raw)
+        return {
+            "reply": reply or "I could not generate a response from the available context.",
+            "context": context_payload,
+            "model": model,
+        }
 
     # flush the remaining data and close connection
     def close(self):

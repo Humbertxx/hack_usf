@@ -5,8 +5,12 @@ from typing import Any
 from fastapi import FastAPI
 
 from backend.api.alerts import router as alerts_router
+from backend.api.insights_chat import router as insights_chat_router
+from backend.api.insights_trends import router as insights_trends_router
 from backend.api.live_events import router as live_events_router
 from backend.api.observations import router as observations_router
+from backend.api.primary_state import router as primary_state_router
+from backend.api.timeline import router as timeline_router
 from backend.ws.live import router as live_ws_router
 
 
@@ -20,6 +24,10 @@ def create_app() -> FastAPI:
     app.include_router(observations_router)
     app.include_router(alerts_router)
     app.include_router(live_events_router)
+    app.include_router(primary_state_router)
+    app.include_router(insights_trends_router)
+    app.include_router(insights_chat_router)
+    app.include_router(timeline_router)
     app.include_router(live_ws_router)
 
     cv_mount_error = _try_mount_cv_app(app)
@@ -35,6 +43,10 @@ def create_app() -> FastAPI:
                 "/api/observations",
                 "/api/alerts",
                 "/api/live-events",
+                "/api/primary-state",
+                "/api/insights-trends",
+                "/api/insights-chat",
+                "/api/timeline",
                 "/ws/live",
             ],
             "cv_mount_prefix": "/cv",
