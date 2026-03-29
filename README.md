@@ -1,4 +1,4 @@
-# ElderWatch (Hack USF 2026)
+# ElderWatch (HackUSF 2026)
 
 ElderWatch is an elderly-monitoring platform that combines computer vision, event pipelines, and a dashboard experience to help caregivers understand daily activity patterns, potential risk events, and trend summaries.
 
