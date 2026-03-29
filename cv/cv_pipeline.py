@@ -18,9 +18,9 @@ from ultralytics import YOLO
 from cv.models import ActivityType, Detection, MotionLevel, Observation, PoseType
 
 _CACHE_DIR = Path(__file__).resolve().parent / ".cache"
-_POSE_LITE_URL = (
+_POSE_HEAVY_URL = (
     "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
-    "pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
+    "pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task"
 )
 
 # BlazePose landmark indices (identical across legacy PoseLandmarker and Tasks lists).
@@ -141,47 +141,43 @@ def _visibility(lm: Any) -> float:
 
 def _infer_activity(pose: PoseType, labels: Set[str]) -> Tuple[ActivityType, float]:
     """
-    Infer activity from pose and detected objects.
-    
-    When pose is UNKNOWN but we have contextual objects, we can still infer activity.
+    Infer activity from pose and detected objects (eating vs drinking vs idle/unknown).
+    Beverage-only detections map to drinking; food/utensils map to eating (including meal + drink).
     """
     labels_l = {x.lower() for x in labels}
-    
-    # Contextual object sets
-    kitchen_objects = {"oven", "microwave", "refrigerator", "sink"}
-    media_objects = {"tv", "laptop", "remote"}
-    dining_objects = {"bowl", "banana", "apple", "bottle", "cup", "fork", "knife", "spoon", "sandwich", "pizza"}
-    furniture_objects = {"chair", "couch", "sofa", "dining table"}
 
-    if pose == PoseType.LYING and {"bed", "couch", "sofa"} & labels_l:
-        return ActivityType.SLEEPING, 0.65
+    food_eating = {
+        "bowl",
+        "banana",
+        "apple",
+        "fork",
+        "knife",
+        "spoon",
+        "sandwich",
+        "pizza",
+        "cake",
+        "carrot",
+        "orange",
+        "broccoli",
+    }
+    beverage = {"bottle", "cup", "wine glass"}
+
+    upright = (PoseType.SITTING, PoseType.STANDING, PoseType.UNKNOWN)
+
     if pose == PoseType.LYING:
         return ActivityType.IDLE, 0.55
-    if kitchen_objects & labels_l and pose in (
-        PoseType.STANDING,
-        PoseType.WALKING,
-        PoseType.SITTING,
-        PoseType.UNKNOWN,  # Allow UNKNOWN pose in kitchen context
-    ):
-        return ActivityType.COOKING, 0.7 if pose != PoseType.UNKNOWN else 0.55
-    if media_objects & labels_l and pose in (PoseType.SITTING, PoseType.LYING, PoseType.UNKNOWN):
-        return ActivityType.WATCHING_TV, 0.65 if pose != PoseType.UNKNOWN else 0.5
-    if dining_objects & labels_l and pose in (
-        PoseType.SITTING,
-        PoseType.STANDING,
-        PoseType.UNKNOWN,  # Eating at table with partial visibility
-    ):
+    if food_eating & labels_l and pose in upright:
         return ActivityType.EATING, 0.65 if pose != PoseType.UNKNOWN else 0.5
-    
-    # For UNKNOWN pose, try to infer from furniture context
+    if beverage & labels_l and pose in upright:
+        return ActivityType.DRINKING, 0.65 if pose != PoseType.UNKNOWN else 0.5
+
     if pose == PoseType.UNKNOWN:
         if {"chair", "dining table"} & labels_l:
-            # Sitting at table (common scenario: camera across table)
             return ActivityType.IDLE, 0.5
         if {"couch", "sofa"} & labels_l:
             return ActivityType.IDLE, 0.5
         return ActivityType.UNKNOWN, 0.4
-        
+
     return ActivityType.IDLE, 0.55
 
 
@@ -214,11 +210,11 @@ def _keypoint_vector_from_landmarks(landmarks: Optional[List[Any]]) -> Optional[
     return np.array(pts, dtype=np.float32)
 
 
-def _ensure_pose_model(path: Path = _CACHE_DIR / "pose_landmarker_lite.task") -> Path:
+def _ensure_pose_model(path: Path = _CACHE_DIR / "pose_landmarker_heavy.task") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.stat().st_size > 10_000:
         return path
-    urlretrieve(_POSE_LITE_URL, path)
+    urlretrieve(_POSE_HEAVY_URL, path)
     return path
 
 
@@ -233,7 +229,7 @@ class _PoseHandles:
 def _legacy_pose_handle() -> _PoseHandles:
     legacy = mp.solutions.pose.Pose(
         static_image_mode=False,
-        model_complexity=1,
+        model_complexity=2,
         enable_segmentation=False,
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5,
@@ -262,7 +258,15 @@ def _tasks_pose_handle() -> _PoseHandles:
 
 
 def _build_pose_handles(backend_pref: str) -> _PoseHandles:
-    pref = (backend_pref or "auto").strip().lower()
+    """
+    Pose backends:
+    - tasks / auto: BlazePose **heavy** landmarker only (pose_landmarker_heavy.task). No legacy fallback.
+    - legacy: optional mediapipe.solutions.pose (different stack; not the heavy .task bundle).
+    - none: pose disabled.
+    """
+    pref = (backend_pref or "tasks").strip().lower()
+    if pref == "auto":
+        pref = "tasks"
     if pref == "none":
         return _PoseHandles(backend="none")
 
@@ -272,31 +276,24 @@ def _build_pose_handles(backend_pref: str) -> _PoseHandles:
         if not can_legacy:
             raise RuntimeError(
                 "CV_POSE_BACKEND=legacy but mediapipe.solutions.pose is not available "
-                "(common on Python 3.13+ wheels). Use Python 3.10–3.12, or CV_POSE_BACKEND=tasks, or none."
+                "(common on Python 3.13+ wheels). Use CV_POSE_BACKEND=tasks for the heavy landmarker, or none."
             )
         return _legacy_pose_handle()
 
-    if pref == "auto" and can_legacy:
-        try:
-            return _legacy_pose_handle()
-        except Exception:
-            pass
-
-    if pref in ("auto", "tasks"):
+    if pref == "tasks":
         try:
             return _tasks_pose_handle()
         except OSError as exc:
-            # Tasks API loads mediapipe .so's that link libGLESv2 (often absent in headless GPU containers).
-            if pref == "tasks":
-                raise RuntimeError(
-                    "MediaPipe tasks pose failed to load native libraries (typical: missing libGLESv2.so.2). "
-                    "On Debian/Ubuntu: apt-get install -y libgles2-mesa "
-                    "or set CV_POSE_BACKEND=legacy (if available) or none. "
-                    f"Original error: {exc}"
-                ) from exc
-            return _PoseHandles(backend="none")
+            raise RuntimeError(
+                "MediaPipe Pose Landmarker (heavy) failed to load native libraries "
+                "(typical: missing libGLESv2.so.2). On Debian/Ubuntu: apt-get install -y libgles2-mesa. "
+                "To run without pose, set CV_POSE_BACKEND=none. "
+                f"Original error: {exc}"
+            ) from exc
 
-    return _PoseHandles(backend="none")
+    raise ValueError(
+        f"Unknown CV_POSE_BACKEND={backend_pref!r}; use tasks, auto, legacy, or none."
+    )
 
 
 @dataclass
@@ -366,48 +363,27 @@ def _normalize_yolo_label(label: str) -> str:
     return " ".join(label.strip().lower().split())
 
 
-# Default COCO-80 allowlist after removing:
-# - All vehicles (bicycle, car, motorcycle, airplane, bus, train, truck, boat)
-# - Travel / mobility gear (skis, snowboard, skateboard, surfboard, suitcase)
-# - Outdoor-only street & play (traffic light, fire hydrant, stop sign, parking meter, bench, kite, frisbee)
-# - Animals except cat and dog
-# - Extra indoor-clutter / non-priority: backpack, baseball bat/glove, bed, clock, donut, hair drier,
-#   handbag, hot dog, keyboard, laptop, mouse, oven, sports ball, teddy bear, tennis racket,
-#   tie, toilet, toothbrush, umbrella, vase
-#   (microwave kept for cooking activity cues)
-# Person is always kept in the detection loop (also in this set for activity labels).
+# Hackathon / expo default: person + chair (scale/context) + eat/drink COCO classes only.
+# No kitchen fixtures, TV/remote, couch, dining table, pets, or clutter — use CV_YOLO_ALLOWED_LABELS to widen.
+# Person is always kept in the detection loop (class 0); this set is for non-person labels.
 _YOLO_DEFAULT_ALLOWED_LABELS: frozenset[str] = frozenset(
     {
         "apple",
         "banana",
-        "book",
         "bottle",
         "bowl",
         "broccoli",
         "cake",
         "carrot",
-        "cat",
-        "cell phone",
         "chair",
-        "couch",
         "cup",
-        "dining table",
-        "dog",
         "fork",
         "knife",
-        "microwave",
         "orange",
         "person",
         "pizza",
-        "potted plant",
-        "refrigerator",
-        "remote",
         "sandwich",
-        "scissors",
-        "sink",
         "spoon",
-        "toaster",
-        "tv",
         "wine glass",
     }
 )
@@ -449,7 +425,7 @@ class CVPipeline:
         self.yolo_model = YOLO(name)
         self._yolo_imgsz = _yolo_imgsz()
         self._yolo_allowed_labels = _yolo_allowed_labels()
-        pref = pose_backend if pose_backend is not None else os.environ.get("CV_POSE_BACKEND", "auto")
+        pref = pose_backend if pose_backend is not None else os.environ.get("CV_POSE_BACKEND", "tasks")
         self._pose = _build_pose_handles(pref)
         self._prev_kp: Optional[np.ndarray] = None
 
@@ -687,9 +663,8 @@ class CVPipeline:
 
         observed_at = datetime.now(timezone.utc)
         oid = str(uuid.uuid4())
+        # Expo demo: no room layout; column kept for schema / Snowflake compatibility.
         room_hint = "unknown"
-        if labels:
-            room_hint = labels[0]
 
         is_fall_risk = person_detected and pose_type == PoseType.LYING and pose_conf >= 0.45
 

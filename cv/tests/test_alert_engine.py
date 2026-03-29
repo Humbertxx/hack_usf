@@ -18,6 +18,7 @@ def _obs(
     motion: MotionLevel = MotionLevel.NORMAL,
     minutes_unseen: int = 0,
     at: datetime | None = None,
+    pose_confidence: float = 0.9,
 ) -> Observation:
     t = at or datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
     return Observation(
@@ -25,7 +26,7 @@ def _obs(
         observed_at=t,
         person_detected=person,
         pose=pose,
-        pose_confidence=0.9,
+        pose_confidence=pose_confidence,
         activity=ActivityType.IDLE,
         activity_confidence=0.8,
         objects_detected=[],
@@ -46,6 +47,50 @@ def test_fall_detected_when_lying_after_standing() -> None:
     assert alert is not None
     assert alert.alert_type == "fall_detected"
     assert alert.severity == Severity.CRITICAL
+    assert alert.triggered_at == t0 + timedelta(seconds=1)
+
+
+def test_fall_detected_when_lying_after_sitting() -> None:
+    eng = AlertEngine()
+    t0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    assert eng.check(_obs("1", pose=PoseType.SITTING, at=t0)) is None
+    alert = eng.check(_obs("2", pose=PoseType.LYING, at=t0 + timedelta(seconds=1)))
+    assert alert is not None
+    assert alert.alert_type == "fall_detected"
+    assert alert.severity == Severity.CRITICAL
+
+
+def test_fall_detected_when_lying_after_walking() -> None:
+    eng = AlertEngine()
+    t0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    assert eng.check(_obs("1", pose=PoseType.WALKING, at=t0)) is None
+    alert = eng.check(_obs("2", pose=PoseType.LYING, at=t0 + timedelta(seconds=2)))
+    assert alert is not None
+    assert alert.alert_type == "fall_detected"
+
+
+def test_cold_start_lying_once_with_confidence() -> None:
+    eng = AlertEngine()
+    t0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    a1 = eng.check(
+        _obs("1", pose=PoseType.LYING, at=t0, pose_confidence=0.5),
+    )
+    assert a1 is not None
+    assert a1.alert_type == "fall_detected"
+    assert "session start" in a1.quick_message.lower()
+    a2 = eng.check(_obs("2", pose=PoseType.LYING, at=t0 + timedelta(seconds=1)))
+    assert a2 is None
+
+
+def test_cold_start_lying_skipped_when_pose_confidence_low() -> None:
+    eng = AlertEngine()
+    t0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    assert (
+        eng.check(
+            _obs("1", pose=PoseType.LYING, at=t0, pose_confidence=0.44),
+        )
+        is None
+    )
 
 
 def test_no_motion_after_threshold() -> None:

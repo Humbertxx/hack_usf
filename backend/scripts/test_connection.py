@@ -40,7 +40,7 @@ def generate_mock_observation():
         person_detected=True,
         pose=PoseType.SITTING,
         pose_confidence=0.92,
-        activity=ActivityType.WATCHING_TV,
+        activity=ActivityType.DRINKING,
         activity_confidence=0.85,
         objects_detected=["remote", "couch"],
         room_hint="living_room",
