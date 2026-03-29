@@ -35,26 +35,26 @@ export default function InsightCard({person}: InsightCardProps) {
     grandpa: [
     {
       name: "Activity Level",
-      measurement: "67 hrs/day",
-      description: "More active than usual.",
+      measurement: "76 hrs/day",
+      description: "More active than usual o.o.",
     },
 
     {
       name: "Sleep Quality",
       measurement: "67%",
-      description: "Less sleep than normal",
+      description: "More sleep than normal",
     },
 
     {
       name: "Meal Regularity",
-      measurement: "100/100",
-      description: "Well fed.",
+      measurement: "89/100",
+      description: "Quite well fed.",
     },
 
     {
       name: "Well-Being Score",
       measurement: "0/100",
-      description: "Uh oh.",
+      description: "yea.",
     },        
     ]
 }

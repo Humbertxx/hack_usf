@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
+  --background: #bbf7d0;
   --foreground: #171717;
 }
 
@@ -24,7 +24,8 @@
 
 body {
   /* Optional: A very subtle gradient just to keep it from looking "flat" */
-  background: linear-gradient(to bottom, #bbf7d0, #a7f3d0);
+  /*background: linear-gradient(to bottom, #bbf7d0, #a7f3d0);*/
+  background:#bbf7d0;
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
