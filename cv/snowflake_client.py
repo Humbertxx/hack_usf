@@ -9,9 +9,29 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional, Tuple, Union
 
 from cv.models import Alert, Observation
+
+
+def _normalize_objects_detected(value: Any) -> str:
+    """
+    Match backend/server/snowflake_client.py so VARIANT-bound JSON matches write_pandas.
+    """
+    if value is None:
+        return "[]"
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return "[]"
+        try:
+            decoded = json.loads(stripped)
+        except json.JSONDecodeError:
+            return json.dumps([stripped])
+        return json.dumps(decoded)
+    if isinstance(value, (list, tuple)):
+        return json.dumps(list(value))
+    return json.dumps([value])
 
 
 class SnowflakeClient:
@@ -33,13 +53,22 @@ class SnowflakeClient:
         
         self._write_pandas = write_pandas
         
+        account = os.getenv("SNOWFLAKE_ACCOUNT")
+        user = os.getenv("SNOWFLAKE_USER")
+        password = os.getenv("SNOWFLAKE_PASSWORD")
+        warehouse = os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH")
+        database = os.getenv("SNOWFLAKE_DATABASE", "GRANDMA_MONITOR")
+        schema = os.getenv("SNOWFLAKE_SCHEMA", "PUBLIC")
+        
+        print(f"[SnowflakeClient] Connecting with account={account}, user={user}, db={database}, schema={schema}")
+        
         self.conn = snowflake.connector.connect(
-            account=os.getenv("SNOWFLAKE_ACCOUNT"),
-            user=os.getenv("SNOWFLAKE_USER"),
-            password=os.getenv("SNOWFLAKE_PASSWORD"),
-            warehouse=os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
-            database=os.getenv("SNOWFLAKE_DATABASE", "GRANDMA_MONITOR"),
-            schema=os.getenv("SNOWFLAKE_SCHEMA", "PUBLIC"),
+            account=account,
+            user=user,
+            password=password,
+            warehouse=warehouse,
+            database=database,
+            schema=schema,
             session_parameters={
                 "PYTHON_CONNECTOR_QUERY_RESULT_FORMAT": "JSON"
             }
@@ -51,7 +80,12 @@ class SnowflakeClient:
         self.last_flush = datetime.now(timezone.utc)
         self.FLUSH_INTERVAL_SECONDS = 30
         
-        print(f"[SnowflakeClient] Connected to {os.getenv('SNOWFLAKE_DATABASE', 'GRANDMA_MONITOR')}")
+        # Verify connection by checking current context
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT CURRENT_DATABASE(), CURRENT_SCHEMA(), CURRENT_USER()")
+        ctx = cursor.fetchone()
+        cursor.close()
+        print(f"[SnowflakeClient] Connected! DB={ctx[0]}, Schema={ctx[1]}, User={ctx[2]}")
     
     def add_observation(self, obs: Observation) -> None:
         """Add observation to buffer. Flushes when batch size reached."""
@@ -70,7 +104,7 @@ class SnowflakeClient:
             "POSE_CONFIDENCE": obs.pose_confidence,
             "ACTIVITY": obs.activity.value if hasattr(obs.activity, "value") else obs.activity,
             "ACTIVITY_CONFIDENCE": obs.activity_confidence,
-            "OBJECTS_DETECTED": json.dumps(obs.objects_detected),
+            "OBJECTS_DETECTED": _normalize_objects_detected(obs.objects_detected),
             "ROOM_HINT": obs.room_hint,
             "IS_FALL_RISK": obs.is_fall_risk,
             "MOTION_LEVEL": obs.motion_level.value if hasattr(obs.motion_level, "value") else obs.motion_level,
@@ -109,33 +143,94 @@ class SnowflakeClient:
         print(f"[SNOWFLAKE] Alert: {alert.alert_type} - {alert.quick_message}")
         self.flush()
     
+    @staticmethod
+    def _write_pandas_result_summary(result: Union[bool, Tuple[Any, ...]]) -> tuple[bool, int]:
+        """snowflake write_pandas returns (success, nchunks, nrows, ...) or legacy shapes."""
+        if isinstance(result, tuple) and len(result) >= 3:
+            return bool(result[0]), int(result[2])
+        if isinstance(result, tuple) and len(result) == 2:
+            return bool(result[0]), int(result[1])
+        return bool(result), -1
+
     def flush(self) -> None:
         """Write buffered data to Snowflake."""
         import pandas as pd
-        
+
         try:
             if self.observation_buffer:
+                nbuf = len(self.observation_buffer)
                 df = pd.DataFrame(self.observation_buffer)
-                self._write_pandas(
+                
+                # Debug: verify connection is still alive
+                try:
+                    cursor = self.conn.cursor()
+                    cursor.execute("SELECT CURRENT_DATABASE(), CURRENT_SCHEMA()")
+                    db_info = cursor.fetchone()
+                    cursor.close()
+                    print(f"[SNOWFLAKE] Writing to {db_info[0]}.{db_info[1]}.RAW_OBSERVATIONS")
+                except Exception as conn_err:
+                    print(f"[SNOWFLAKE ERROR] Connection check failed: {conn_err}")
+                    raise
+                
+                wp_out = self._write_pandas(
                     self.conn,
                     df,
                     "RAW_OBSERVATIONS",
                     auto_create_table=False,
                     use_logical_type=True,
                 )
-                print(f"[SNOWFLAKE] Flushed {len(self.observation_buffer)} observations")
+                ok, nrows = self._write_pandas_result_summary(wp_out)
+                print(
+                    f"[SNOWFLAKE] Flushed {nbuf} observations "
+                    f"(write_pandas ok={ok}, rows_reported={nrows})",
+                )
+                if not ok:
+                    raise RuntimeError("write_pandas returned success=False for RAW_OBSERVATIONS")
+                if nrows >= 0 and nrows != nbuf:
+                    raise RuntimeError(
+                        f"write_pandas row count mismatch: buffered {nbuf}, reported {nrows}",
+                    )
+                
+                # Verify the write by checking the row exists
+                try:
+                    first_id = self.observation_buffer[0]["ID"]
+                    cursor = self.conn.cursor()
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM RAW_OBSERVATIONS WHERE ID = %s",
+                        (first_id,)
+                    )
+                    count = cursor.fetchone()[0]
+                    cursor.close()
+                    if count == 0:
+                        print(f"[SNOWFLAKE WARNING] Row {first_id} not found after write!")
+                    else:
+                        print(f"[SNOWFLAKE] Verified: row {first_id} exists in table")
+                except Exception as verify_err:
+                    print(f"[SNOWFLAKE WARNING] Could not verify write: {verify_err}")
+                
                 self.observation_buffer = []
-            
+
             if self.alert_buffer:
+                nbuf = len(self.alert_buffer)
                 df = pd.DataFrame(self.alert_buffer)
-                self._write_pandas(
+                wp_out = self._write_pandas(
                     self.conn,
                     df,
                     "ALERTS",
                     auto_create_table=False,
                     use_logical_type=True,
                 )
-                print(f"[SNOWFLAKE] Flushed {len(self.alert_buffer)} alerts")
+                ok, nrows = self._write_pandas_result_summary(wp_out)
+                print(
+                    f"[SNOWFLAKE] Flushed {nbuf} alerts "
+                    f"(write_pandas ok={ok}, rows_reported={nrows})",
+                )
+                if not ok:
+                    raise RuntimeError("write_pandas returned success=False for ALERTS")
+                if nrows >= 0 and nrows != nbuf:
+                    raise RuntimeError(
+                        f"write_pandas row count mismatch (alerts): buffered {nbuf}, reported {nrows}",
+                    )
                 self.alert_buffer = []
             
             self.last_flush = datetime.now(timezone.utc)
