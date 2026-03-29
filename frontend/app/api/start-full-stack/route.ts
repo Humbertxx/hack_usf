@@ -24,8 +24,13 @@ export async function POST(request: Request) {
     );
   }
 
+  /** Single bash -lc string; cwd is HACK_USF_ROOT (repo root). Default runs the full-stack script. */
+  const bashLc =
+    process.env.HACK_USF_FULL_STACK_LC?.trim() ||
+    "exec ./capture/run_full_stack.sh";
+
   try {
-    const child = spawn("bash", ["-lc", "exec ./capture/run_full_stack.sh"], {
+    const child = spawn("bash", ["-lc", bashLc], {
       cwd: repoRoot,
       detached: true,
       stdio: "ignore",
