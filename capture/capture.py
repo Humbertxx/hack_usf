@@ -15,13 +15,16 @@ import numpy as np
 
 # Defaults per WORKSTREAM_A_CV_SETUP.md Phase 4.1
 RESOLUTION = (1920, 1080)
-CAPTURE_INTERVAL = 2  # seconds
+CAPTURE_INTERVAL = 1.0  # seconds
 JPEG_QUALITY = 95
 SERVER_URL = "http://localhost:8080/process-frame"
 
 _DEFAULT_MAX_QUEUE = 64
 _DEFAULT_MAX_ATTEMPTS_PER_FRAME = 5
 _DEFAULT_POST_TIMEOUT_SEC = 30.0
+_DEFAULT_WARMUP_SEC = 1.5
+_DEFAULT_BURST_COUNT = 3
+_DEFAULT_BURST_SPAN_MS = 180
 
 
 def _truthy_env(name: str) -> bool:
@@ -41,6 +44,9 @@ class CaptureConfig:
     max_queue: int
     max_attempts_per_frame: int
     post_timeout_sec: float
+    warmup_seconds: float
+    burst_count: int
+    burst_span_ms: int
 
     @classmethod
     def from_env(cls) -> CaptureConfig:
@@ -67,6 +73,19 @@ class CaptureConfig:
                     "CAPTURE_POST_TIMEOUT_SEC", str(_DEFAULT_POST_TIMEOUT_SEC)
                 )
             ),
+            warmup_seconds=float(
+                os.environ.get(
+                    "CAPTURE_WARMUP_SECONDS", str(_DEFAULT_WARMUP_SEC)
+                )
+            ),
+            burst_count=max(
+                1,
+                int(os.environ.get("CAPTURE_BURST_COUNT", str(_DEFAULT_BURST_COUNT))),
+            ),
+            burst_span_ms=max(
+                0,
+                int(os.environ.get("CAPTURE_BURST_SPAN_MS", str(_DEFAULT_BURST_SPAN_MS))),
+            ),
         )
 
 
@@ -88,7 +107,50 @@ def resize_to_resolution(frame: np.ndarray, width: int, height: int) -> np.ndarr
     """Resize frame to target WxH (matches 720p deliverable)."""
     if frame.shape[1] == width and frame.shape[0] == height:
         return frame
-    return cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+    src_h, src_w = frame.shape[:2]
+    upscaling = width > src_w or height > src_h
+    interpolation = cv2.INTER_LINEAR if upscaling else cv2.INTER_AREA
+    return cv2.resize(frame, (width, height), interpolation=interpolation)
+
+
+def _focus_score(frame: np.ndarray) -> float:
+    """Higher = sharper frame (Laplacian variance)."""
+    if frame is None or frame.size == 0:
+        return 0.0
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    lap = cv2.Laplacian(gray, cv2.CV_64F)
+    return float(lap.var())
+
+
+def _select_best_frame_in_burst(
+    cap: cv2.VideoCapture,
+    first_frame: np.ndarray,
+    burst_count: int,
+    burst_span_ms: int,
+) -> np.ndarray:
+    """
+    Keep current frame plus up to (burst_count-1) quick reads, return sharpest.
+    """
+    count = max(1, int(burst_count))
+    if count == 1:
+        return first_frame
+
+    best_frame = first_frame
+    best_score = _focus_score(first_frame)
+    per_gap_sec = max(0.0, float(burst_span_ms) / 1000.0 / float(max(1, count - 1)))
+
+    for _ in range(count - 1):
+        if per_gap_sec > 0:
+            time.sleep(per_gap_sec)
+        ok, candidate = cap.read()
+        if not ok or candidate is None:
+            continue
+        score = _focus_score(candidate)
+        if score > best_score:
+            best_score = score
+            best_frame = candidate
+
+    return best_frame
 
 
 def _print_cv_result(response: dict) -> None:
@@ -324,6 +386,13 @@ def run_capture(
     actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     print(f"[capture] Camera resolution: requested {cfg.width}x{cfg.height}, actual {actual_w}x{actual_h}")
+    warmup_seconds = max(0.0, cfg.warmup_seconds)
+    warmup_until = time.time() + warmup_seconds
+    print(
+        f"[capture] Burst selection: count={cfg.burst_count}, span_ms={cfg.burst_span_ms}"
+    )
+    if warmup_seconds > 0:
+        print(f"[capture] Camera warmup enabled: {warmup_seconds:.1f}s")
 
     pending: Deque[bytes] = deque(maxlen=cfg.max_queue)
     last_capture_time = 0.0
@@ -350,7 +419,34 @@ def run_capture(
             frame = resize_to_resolution(frame, cfg.width, cfg.height)
             
             now = time.time()
+            if now < warmup_until:
+                if preview:
+                    warmup_frame = frame.copy()
+                    remaining = max(0.0, warmup_until - now)
+                    cv2.putText(
+                        warmup_frame,
+                        f"Warming up camera... {remaining:.1f}s",
+                        (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1.0,
+                        (0, 255, 255),
+                        2,
+                    )
+                    cv2.imshow(window_name, warmup_frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord('q'):
+                        print("[capture] 'q' pressed, exiting.")
+                        break
+                time.sleep(0.03)
+                continue
+
             if now - last_capture_time >= cfg.capture_interval_sec:
+                frame = _select_best_frame_in_burst(
+                    cap,
+                    frame,
+                    cfg.burst_count,
+                    cfg.burst_span_ms,
+                )
                 jpeg = frame_to_jpeg(frame, cfg.jpeg_quality)
                 if jpeg is not None:
                     pending.append(jpeg)

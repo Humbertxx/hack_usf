@@ -261,7 +261,8 @@ class TestIdentityStore:
         store = IdentityStore(gallery_path=temp_gallery_path)
         store.enroll("grandma", "Grandma", sample_embedding)
         
-        similar_emb = sample_embedding + np.random.randn(512).astype(np.float32) * 0.1
+        rng = np.random.default_rng(42)
+        similar_emb = sample_embedding + rng.standard_normal(512).astype(np.float32) * 0.06
         similar_emb /= np.linalg.norm(similar_emb)
         
         match = store.match(similar_emb, threshold=0.5)

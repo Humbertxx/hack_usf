@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable, List, Optional
@@ -28,9 +29,14 @@ from cv.reid_embeddings import ReIDEmbedder
 from cv.snowflake_client import create_snowflake_client
 from cv.websocket_manager import WebSocketManager
 
-# Must align with ReID match threshold in cv_pipeline._enrich_person_detection (0.65).
-# If this is higher than that threshold, frames can be "MATCHED" in logs but never sent to Snowflake.
-MIN_IDENTITY_CONFIDENCE = 0.65
+# Snowflake / API gate for "this frame counts as the enrolled person."
+# Default 0.58 pairs with CV_REID_STICKY_THRESHOLD hysteresis (see cv_pipeline); raise if you want stricter storage.
+def _min_identity_confidence() -> float:
+    raw = os.environ.get("CV_MIN_IDENTITY_CONFIDENCE", "0.58").strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.58
 
 
 def _load_runtime_env() -> None:
@@ -58,7 +64,7 @@ def should_send_to_snowflake(
     Requirements:
     1. Must pass basic noise filter (confidence, quality thresholds)
     2. If person detected, must be an enrolled person (Grandma/Grandpa)
-       with identity confidence >= MIN_IDENTITY_CONFIDENCE
+       with identity confidence >= CV_MIN_IDENTITY_CONFIDENCE (see _min_identity_confidence)
     
     This ensures only high-quality, identified observations are stored.
     """
@@ -72,10 +78,11 @@ def should_send_to_snowflake(
             print(f"[Snowflake Filter] Skipping: person detected but no enrolled identity")
             return False
         
-        # Must have high identity confidence
-        if obs.primary_identity_confidence is None or obs.primary_identity_confidence < MIN_IDENTITY_CONFIDENCE:
+        # Must have high enough identity confidence (defaults align with ReID sticky floor)
+        min_id = _min_identity_confidence()
+        if obs.primary_identity_confidence is None or obs.primary_identity_confidence < min_id:
             conf = obs.primary_identity_confidence or 0.0
-            print(f"[Snowflake Filter] Skipping: identity confidence too low ({conf:.2f} < {MIN_IDENTITY_CONFIDENCE})")
+            print(f"[Snowflake Filter] Skipping: identity confidence too low ({conf:.2f} < {min_id})")
             return False
     
     return True

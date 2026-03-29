@@ -192,25 +192,10 @@ class IdentityStore:
             self._save()
             return True
 
-    def match(
-        self,
-        embedding: np.ndarray,
-        threshold: float = 0.65,
-    ) -> Optional[Tuple[str, float]]:
+    def best_match(self, embedding: np.ndarray) -> Optional[Tuple[str, float]]:
         """
-        Find the best matching enrolled subject for an embedding.
-        
-        Uses cosine similarity against all enrolled embeddings and returns
-        the subject with the highest average similarity above threshold.
-        
-        Args:
-            embedding: 512-dim normalized query embedding
-            threshold: Minimum similarity score to consider a match (0-1).
-                       Default 0.65 balances precision/recall.
-                       
-        Returns:
-            Tuple of (subject_id, similarity_score) if match found,
-            None if no match above threshold.
+        Best enrolled subject for this query: max cosine similarity to any stored
+        embedding (each enrollment photo is a separate template; multi-view = OR).
         """
         if embedding.ndim != 1 or len(embedding) != 512:
             raise ValueError("embedding must be a 512-dim vector")
@@ -220,27 +205,39 @@ class IdentityStore:
         if query_norm > 1e-6:
             query = query / query_norm
 
-        best_match: Optional[Tuple[str, float]] = None
-        best_score = threshold
+        best: Optional[Tuple[str, float]] = None
+        best_score = -1.0
 
         with self._lock:
             for subject_id, subject in self._subjects.items():
                 if not subject.embeddings:
                     continue
 
-                similarities = []
-                for emb_list in subject.embeddings:
-                    emb = np.array(emb_list, dtype=np.float64)
-                    sim = float(np.dot(query, emb))
-                    similarities.append(sim)
-
-                max_sim = max(similarities)
-                
+                max_sim = max(
+                    float(np.dot(query, np.array(emb_list, dtype=np.float64)))
+                    for emb_list in subject.embeddings
+                )
                 if max_sim > best_score:
                     best_score = max_sim
-                    best_match = (subject_id, max_sim)
+                    best = (subject_id, max_sim)
 
-        return best_match
+        return best
+
+    def match(
+        self,
+        embedding: np.ndarray,
+        threshold: float = 0.65,
+    ) -> Optional[Tuple[str, float]]:
+        """
+        Same as best_match, but returns None unless similarity >= threshold.
+        """
+        b = self.best_match(embedding)
+        if b is None:
+            return None
+        subject_id, sim = b
+        if sim >= threshold:
+            return b
+        return None
 
     def get(self, subject_id: str) -> Optional[EnrolledSubject]:
         """

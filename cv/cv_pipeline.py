@@ -43,10 +43,88 @@ def _device() -> str:
     return "cuda:0" if torch.cuda.is_available() else "cpu"
 
 
-def _frame_quality_score(gray: np.ndarray) -> float:
+def _laplacian_variance(gray: np.ndarray) -> float:
     lap = cv2.Laplacian(gray, cv2.CV_64F)
-    variance = float(lap.var())
+    return float(lap.var())
+
+
+def _laplacian_quality(variance: float) -> float:
     return float(max(0.0, min(1.0, variance / 800.0)))
+
+
+def _bbox_to_pixels(
+    bbox: List[float],
+    width: int,
+    height: int,
+) -> Optional[Tuple[int, int, int, int]]:
+    if len(bbox) != 4:
+        return None
+    x1, y1, x2, y2 = bbox
+    x1 = int(max(0.0, min(1.0, x1)) * width)
+    y1 = int(max(0.0, min(1.0, y1)) * height)
+    x2 = int(max(0.0, min(1.0, x2)) * width)
+    y2 = int(max(0.0, min(1.0, y2)) * height)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return x1, y1, x2, y2
+
+
+def _frame_quality_score(
+    gray: np.ndarray,
+    person_bboxes: Optional[List[List[float]]] = None,
+) -> Tuple[float, Dict[str, float]]:
+    h, w = gray.shape[:2]
+    frame_var = _laplacian_variance(gray)
+    frame_score = _laplacian_quality(frame_var)
+
+    best_roi_var = 0.0
+    best_roi_score = 0.0
+    best_roi_area_ratio = 0.0
+
+    for bbox in person_bboxes or []:
+        px = _bbox_to_pixels(bbox, w, h)
+        if px is None:
+            continue
+        x1, y1, x2, y2 = px
+        roi = gray[y1:y2, x1:x2]
+        if roi.size == 0 or roi.shape[0] < 20 or roi.shape[1] < 20:
+            continue
+        area_ratio = float(((x2 - x1) * (y2 - y1)) / float(w * h))
+        if area_ratio <= best_roi_area_ratio:
+            continue
+        best_roi_area_ratio = area_ratio
+        best_roi_var = _laplacian_variance(roi)
+        best_roi_score = _laplacian_quality(best_roi_var)
+
+    used_roi = best_roi_area_ratio > 0.0
+    roi_weight = 0.0
+    if used_roi:
+        # Prioritize person clarity over background texture. Increase ROI emphasis
+        # as the subject occupies more of the frame.
+        if best_roi_area_ratio >= 0.25:
+            roi_weight = 0.95
+        elif best_roi_area_ratio >= 0.15:
+            roi_weight = 0.90
+        else:
+            roi_weight = 0.75
+        quality = float(
+            max(
+                0.0,
+                min(1.0, (roi_weight * best_roi_score) + ((1.0 - roi_weight) * frame_score)),
+            )
+        )
+    else:
+        quality = frame_score
+
+    return quality, {
+        "frame_var": frame_var,
+        "frame_score": frame_score,
+        "roi_var": best_roi_var,
+        "roi_score": best_roi_score,
+        "roi_area_ratio": best_roi_area_ratio,
+        "roi_weight": roi_weight,
+        "used_roi": 1.0 if used_roi else 0.0,
+    }
 
 
 def _infer_pose_type_from_landmarks(
@@ -59,7 +137,7 @@ def _infer_pose_type_from_landmarks(
     Full body mode: Uses shoulders + hips (most accurate)
     Upper body mode: Uses nose + shoulders when hips aren't visible (e.g., sitting at table)
     """
-    if not landmarks or len(landmarks) <= max(_L_HIP, _R_HIP):
+    if not landmarks or len(landmarks) <= max(_L_KNEE, _R_KNEE):
         return PoseType.UNKNOWN, 0.0
 
     ls = landmarks[_L_SHOULDER]
@@ -79,10 +157,25 @@ def _infer_pose_type_from_landmarks(
         hip_y = (lh.y + rh.y) / 2.0
         dy = shoulder_y - hip_y
 
-        if abs(dy) < 0.07:
+        lk = landmarks[_L_KNEE]
+        rk = landmarks[_R_KNEE]
+        knee_vis = min(_visibility(lk), _visibility(rk))
+        hip_knee_y: Optional[float] = None
+        if knee_vis >= 0.25:
+            knee_y = (lk.y + rk.y) / 2.0
+            hip_knee_y = knee_y - hip_y  # + when knees below hips (image y downward)
+
+        # Torso roughly horizontal → lying (tighter band than before to avoid seated slouch → lie)
+        if abs(dy) < 0.055:
             pose = PoseType.LYING
-        elif dy < -0.06:
-            pose = PoseType.WALKING if motion_level in (MotionLevel.HIGH, MotionLevel.NORMAL) else PoseType.STANDING
+        elif dy < -0.055:  # shoulders above hips: upright
+            # Seated (webcam): bent knees → small vertical hip–knee gap vs standing
+            if hip_knee_y is not None and hip_knee_y < 0.15:
+                pose = PoseType.SITTING
+            elif motion_level == MotionLevel.HIGH:
+                pose = PoseType.WALKING
+            else:
+                pose = PoseType.STANDING
         else:
             pose = PoseType.SITTING
 
@@ -105,8 +198,7 @@ def _infer_pose_type_from_landmarks(
             pose = PoseType.LYING
         elif nose_shoulder_dy > 0.08:
             # Nose well above shoulders = upright (sitting or standing)
-            # Without hips, assume SITTING (safer for elderly monitoring)
-            # High motion suggests standing/walking
+            # Without hips, bias seated; only HIGH frame motion → walking
             if motion_level == MotionLevel.HIGH:
                 pose = PoseType.WALKING
             else:
@@ -120,14 +212,13 @@ def _infer_pose_type_from_landmarks(
     
     # Even more fallback: just shoulders visible (face turned away)
     if shoulder_vis >= 0.4:
-        # Can't determine much without face or hips
-        # Use motion to guess
+        # Can't determine much without face or hips — avoid NORMAL→standing (reads as "walking" sit)
         if motion_level == MotionLevel.HIGH:
             return PoseType.WALKING, 0.4
         elif motion_level == MotionLevel.NONE:
             return PoseType.SITTING, 0.4
         else:
-            return PoseType.STANDING, 0.35
+            return PoseType.SITTING, 0.35
     
     return PoseType.UNKNOWN, 0.0
 
@@ -388,6 +479,22 @@ _YOLO_DEFAULT_ALLOWED_LABELS: frozenset[str] = frozenset(
     }
 )
 
+# Food / drink (handheld) — allow lower YOLO conf so bottles/cups still drive activity inference
+_YOLO_ACTIVITY_CLASS_NAMES: frozenset[str] = frozenset(
+    x for x in _YOLO_DEFAULT_ALLOWED_LABELS if x not in {"person", "chair"}
+)
+
+
+def _yolo_detection_conf_threshold(label: str) -> float:
+    """Stricter conf for person/context; softer for eat/drink props (often small / partly occluded)."""
+    if _normalize_yolo_label(label) in _YOLO_ACTIVITY_CLASS_NAMES:
+        raw = os.environ.get("CV_YOLO_ACTIVITY_MIN_CONF", "0.22").strip()
+        try:
+            return max(0.05, min(0.9, float(raw)))
+        except ValueError:
+            return 0.22
+    return 0.35
+
 
 def _yolo_allowed_labels() -> frozenset[str]:
     """
@@ -407,6 +514,31 @@ def _yolo_label_kept(label: str, cls_id: int, allowed: frozenset[str]) -> bool:
     if cls_id == 0 or key == "person":
         return True
     return key in allowed
+
+
+def _reid_match_threshold() -> float:
+    try:
+        return float(os.environ.get("CV_REID_MATCH_THRESHOLD", "0.65"))
+    except ValueError:
+        return 0.65
+
+
+def _reid_sticky_floor(match_high: float) -> Optional[float]:
+    """
+    Optional second, lower cosine floor to keep the same subject_id when the best
+    gallery template still wins but similarity dips (lighting / crop / pose).
+    Set CV_REID_STICKY_THRESHOLD="" to disable.
+    """
+    raw = os.environ.get("CV_REID_STICKY_THRESHOLD", "0.58").strip()
+    if raw == "":
+        return None
+    try:
+        v = float(raw)
+    except ValueError:
+        v = 0.58
+    if v >= match_high:
+        return None
+    return v
 
 
 class CVPipeline:
@@ -433,6 +565,7 @@ class CVPipeline:
         self._reid_embedder: Optional[Any] = None
         self._visitor_buffer: List[_VisitorEntry] = []
         self._visitor_counter = 0
+        self._reid_sticky_subject_id: Optional[str] = None
 
         if identity_store is not None:
             from cv.reid_embeddings import ReIDEmbedder
@@ -570,25 +703,55 @@ class CVPipeline:
                 return
             
             embedding = self._reid_embedder.extract_embedding(crop)
-            
-            # Debug: compute similarity scores against all enrolled subjects
-            match = self._identity_store.match(embedding, threshold=0.65)
-            debug_match = self._identity_store.match(embedding, threshold=0.0)
-            if debug_match:
-                debug_id, debug_sim = debug_match
-                print(f"[ReID Debug] Best match: {debug_id} with similarity {debug_sim:.3f} (threshold: 0.65)")
-            
-            if match:
-                subject_id, similarity = match
-                subject = self._identity_store.get(subject_id)
+
+            th_match = _reid_match_threshold()
+            th_sticky = _reid_sticky_floor(th_match)
+            bm = self._identity_store.best_match(embedding)
+            if bm:
+                debug_id, debug_sim = bm
+                sticky_note = f", sticky≥{th_sticky}" if th_sticky is not None else ""
+                print(
+                    f"[ReID Debug] Best match: {debug_id} with similarity {debug_sim:.3f} "
+                    f"(accept≥{th_match}{sticky_note})"
+                )
+
+            if bm is None:
+                self._reid_sticky_subject_id = None
+                detection.person_id = self._assign_visitor_id(embedding)
+                detection.is_enrolled = False
+                detection.bbox_color = "#808080"
+                detection.identity_confidence = None
+                print(f"[ReID] No enrolled subjects; assigned: {detection.person_id}")
+                return
+
+            best_id, best_sim = bm
+            use_enrolled = False
+            if best_sim >= th_match:
+                use_enrolled = True
+            elif (
+                th_sticky is not None
+                and self._reid_sticky_subject_id is not None
+                and best_id == self._reid_sticky_subject_id
+                and best_sim >= th_sticky
+            ):
+                use_enrolled = True
+                print(
+                    f"[ReID] STICKY: {best_id} sim={best_sim:.3f} "
+                    f"(holding identity; between {th_sticky} and {th_match})"
+                )
+
+            if use_enrolled:
+                self._reid_sticky_subject_id = best_id
+                subject = self._identity_store.get(best_id)
                 if subject:
-                    detection.person_id = subject_id
+                    detection.person_id = best_id
                     detection.display_name = subject.display_name
                     detection.is_enrolled = True
                     detection.bbox_color = subject.color
-                    detection.identity_confidence = similarity
-                    print(f"[ReID] MATCHED: {subject.display_name} (sim={similarity:.3f})")
+                    detection.identity_confidence = best_sim
+                    print(f"[ReID] MATCHED: {subject.display_name} (sim={best_sim:.3f})")
             else:
+                self._reid_sticky_subject_id = None
                 detection.person_id = self._assign_visitor_id(embedding)
                 detection.is_enrolled = False
                 detection.bbox_color = "#808080"  # Gray for visitors
@@ -608,7 +771,6 @@ class CVPipeline:
             raise ValueError("frame must be HxWx3 BGR uint8")
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        quality = _frame_quality_score(gray)
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         landmarks, kp_vec, motion = _extract_landmarks_rgb(rgb, self._pose, self._prev_kp)
@@ -625,6 +787,7 @@ class CVPipeline:
         raw_labels: List[str] = []
         detections: List[Detection] = []
         person_detected = False
+        person_bboxes: List[List[float]] = []
         h, w = frame.shape[:2]
         if results:
             r = results[0]
@@ -632,9 +795,9 @@ class CVPipeline:
                 names = r.names or {}
                 boxes_xyxy = r.boxes.xyxy.tolist() if r.boxes.xyxy is not None else []
                 for i, (cls, conf) in enumerate(zip(r.boxes.cls.tolist(), r.boxes.conf.tolist())):
-                    if conf < 0.35:
-                        continue
                     name = str(names.get(int(cls), str(int(cls))))
+                    if conf < _yolo_detection_conf_threshold(name):
+                        continue
                     cls_i = int(cls)
                     if not _yolo_label_kept(name, cls_i, self._yolo_allowed_labels):
                         continue
@@ -649,10 +812,22 @@ class CVPipeline:
                         bbox = [0.0, 0.0, 0.0, 0.0]
                     detection = Detection(label=name, confidence=float(conf), bbox=bbox)
                     if is_person:
+                        person_bboxes.append(bbox)
                         print(f"[CVPipeline] Person detected, running ReID enrichment...")
                         self._enrich_person_detection(frame, detection)
                         print(f"[CVPipeline] After enrichment: person_id={detection.person_id}, display_name={detection.display_name}")
                     detections.append(detection)
+
+        quality, qdebug = _frame_quality_score(gray, person_bboxes)
+        if quality < 0.25:
+            print(
+                "[Quality Debug] "
+                f"quality={quality:.3f} frame_score={qdebug['frame_score']:.3f} "
+                f"roi_score={qdebug['roi_score']:.3f} roi_area={qdebug['roi_area_ratio']:.3f} "
+                f"roi_weight={qdebug['roi_weight']:.2f} "
+                f"frame_var={qdebug['frame_var']:.1f} roi_var={qdebug['roi_var']:.1f} "
+                f"used_roi={bool(qdebug['used_roi'])}"
+            )
 
         labels = sorted({x for x in raw_labels})
 
