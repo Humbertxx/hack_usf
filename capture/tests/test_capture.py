@@ -41,6 +41,7 @@ def _clear_capture_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "CAPTURE_MAX_QUEUE",
         "CAPTURE_MAX_ATTEMPTS",
         "CAPTURE_POST_TIMEOUT_SEC",
+        "CAPTURE_WARMUP_SECONDS",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -49,12 +50,13 @@ def test_config_defaults_match_workstream_phase4(monkeypatch: pytest.MonkeyPatch
     _clear_capture_env(monkeypatch)
     cfg = CaptureConfig.from_env()
     assert (cfg.width, cfg.height) == RESOLUTION == (1920, 1080)
-    assert cfg.capture_interval_sec == float(CAPTURE_INTERVAL) == 15.0
+    assert cfg.capture_interval_sec == float(CAPTURE_INTERVAL)
     assert cfg.jpeg_quality == JPEG_QUALITY == 95
     assert cfg.server_url == SERVER_URL == "http://localhost:8080/process-frame"
     assert cfg.camera_index == 0
     assert cfg.session_id == "default"
     assert cfg.in_concern_window is False
+    assert cfg.warmup_seconds == 1.5
 
 
 def test_config_reads_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -65,12 +67,14 @@ def test_config_reads_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CAPTURE_SERVER_URL", "http://example.com/process-frame/")
     monkeypatch.setenv("CAPTURE_SESSION_ID", "room-a")
     monkeypatch.setenv("CAPTURE_IN_CONCERN_WINDOW", "1")
+    monkeypatch.setenv("CAPTURE_WARMUP_SECONDS", "2.25")
     cfg = CaptureConfig.from_env()
     assert cfg.width == 640 and cfg.height == 480
     assert cfg.capture_interval_sec == 2.5
     assert cfg.server_url == "http://example.com/process-frame"
     assert cfg.session_id == "room-a"
     assert cfg.in_concern_window is True
+    assert cfg.warmup_seconds == 2.25
 
 
 def test_import_dependencies_for_capture_client() -> None:

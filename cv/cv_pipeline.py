@@ -43,10 +43,74 @@ def _device() -> str:
     return "cuda:0" if torch.cuda.is_available() else "cpu"
 
 
-def _frame_quality_score(gray: np.ndarray) -> float:
+def _laplacian_variance(gray: np.ndarray) -> float:
     lap = cv2.Laplacian(gray, cv2.CV_64F)
-    variance = float(lap.var())
+    return float(lap.var())
+
+
+def _laplacian_quality(variance: float) -> float:
     return float(max(0.0, min(1.0, variance / 800.0)))
+
+
+def _bbox_to_pixels(
+    bbox: List[float],
+    width: int,
+    height: int,
+) -> Optional[Tuple[int, int, int, int]]:
+    if len(bbox) != 4:
+        return None
+    x1, y1, x2, y2 = bbox
+    x1 = int(max(0.0, min(1.0, x1)) * width)
+    y1 = int(max(0.0, min(1.0, y1)) * height)
+    x2 = int(max(0.0, min(1.0, x2)) * width)
+    y2 = int(max(0.0, min(1.0, y2)) * height)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return x1, y1, x2, y2
+
+
+def _frame_quality_score(
+    gray: np.ndarray,
+    person_bboxes: Optional[List[List[float]]] = None,
+) -> Tuple[float, Dict[str, float]]:
+    h, w = gray.shape[:2]
+    frame_var = _laplacian_variance(gray)
+    frame_score = _laplacian_quality(frame_var)
+
+    best_roi_var = 0.0
+    best_roi_score = 0.0
+    best_roi_area_ratio = 0.0
+
+    for bbox in person_bboxes or []:
+        px = _bbox_to_pixels(bbox, w, h)
+        if px is None:
+            continue
+        x1, y1, x2, y2 = px
+        roi = gray[y1:y2, x1:x2]
+        if roi.size == 0 or roi.shape[0] < 20 or roi.shape[1] < 20:
+            continue
+        area_ratio = float(((x2 - x1) * (y2 - y1)) / float(w * h))
+        if area_ratio <= best_roi_area_ratio:
+            continue
+        best_roi_area_ratio = area_ratio
+        best_roi_var = _laplacian_variance(roi)
+        best_roi_score = _laplacian_quality(best_roi_var)
+
+    used_roi = best_roi_area_ratio > 0.0
+    if used_roi:
+        # Prioritize person clarity over background texture.
+        quality = float(max(0.0, min(1.0, (0.75 * best_roi_score) + (0.25 * frame_score))))
+    else:
+        quality = frame_score
+
+    return quality, {
+        "frame_var": frame_var,
+        "frame_score": frame_score,
+        "roi_var": best_roi_var,
+        "roi_score": best_roi_score,
+        "roi_area_ratio": best_roi_area_ratio,
+        "used_roi": 1.0 if used_roi else 0.0,
+    }
 
 
 def _infer_pose_type_from_landmarks(
@@ -693,7 +757,6 @@ class CVPipeline:
             raise ValueError("frame must be HxWx3 BGR uint8")
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        quality = _frame_quality_score(gray)
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         landmarks, kp_vec, motion = _extract_landmarks_rgb(rgb, self._pose, self._prev_kp)
@@ -710,6 +773,7 @@ class CVPipeline:
         raw_labels: List[str] = []
         detections: List[Detection] = []
         person_detected = False
+        person_bboxes: List[List[float]] = []
         h, w = frame.shape[:2]
         if results:
             r = results[0]
@@ -734,10 +798,21 @@ class CVPipeline:
                         bbox = [0.0, 0.0, 0.0, 0.0]
                     detection = Detection(label=name, confidence=float(conf), bbox=bbox)
                     if is_person:
+                        person_bboxes.append(bbox)
                         print(f"[CVPipeline] Person detected, running ReID enrichment...")
                         self._enrich_person_detection(frame, detection)
                         print(f"[CVPipeline] After enrichment: person_id={detection.person_id}, display_name={detection.display_name}")
                     detections.append(detection)
+
+        quality, qdebug = _frame_quality_score(gray, person_bboxes)
+        if quality < 0.25:
+            print(
+                "[Quality Debug] "
+                f"quality={quality:.3f} frame_score={qdebug['frame_score']:.3f} "
+                f"roi_score={qdebug['roi_score']:.3f} roi_area={qdebug['roi_area_ratio']:.3f} "
+                f"frame_var={qdebug['frame_var']:.1f} roi_var={qdebug['roi_var']:.1f} "
+                f"used_roi={bool(qdebug['used_roi'])}"
+            )
 
         labels = sorted({x for x in raw_labels})
 

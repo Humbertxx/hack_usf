@@ -22,6 +22,7 @@ SERVER_URL = "http://localhost:8080/process-frame"
 _DEFAULT_MAX_QUEUE = 64
 _DEFAULT_MAX_ATTEMPTS_PER_FRAME = 5
 _DEFAULT_POST_TIMEOUT_SEC = 30.0
+_DEFAULT_WARMUP_SEC = 1.5
 
 
 def _truthy_env(name: str) -> bool:
@@ -41,6 +42,7 @@ class CaptureConfig:
     max_queue: int
     max_attempts_per_frame: int
     post_timeout_sec: float
+    warmup_seconds: float
 
     @classmethod
     def from_env(cls) -> CaptureConfig:
@@ -67,6 +69,11 @@ class CaptureConfig:
                     "CAPTURE_POST_TIMEOUT_SEC", str(_DEFAULT_POST_TIMEOUT_SEC)
                 )
             ),
+            warmup_seconds=float(
+                os.environ.get(
+                    "CAPTURE_WARMUP_SECONDS", str(_DEFAULT_WARMUP_SEC)
+                )
+            ),
         )
 
 
@@ -88,7 +95,10 @@ def resize_to_resolution(frame: np.ndarray, width: int, height: int) -> np.ndarr
     """Resize frame to target WxH (matches 720p deliverable)."""
     if frame.shape[1] == width and frame.shape[0] == height:
         return frame
-    return cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+    src_h, src_w = frame.shape[:2]
+    upscaling = width > src_w or height > src_h
+    interpolation = cv2.INTER_LINEAR if upscaling else cv2.INTER_AREA
+    return cv2.resize(frame, (width, height), interpolation=interpolation)
 
 
 def _print_cv_result(response: dict) -> None:
@@ -324,6 +334,10 @@ def run_capture(
     actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     print(f"[capture] Camera resolution: requested {cfg.width}x{cfg.height}, actual {actual_w}x{actual_h}")
+    warmup_seconds = max(0.0, cfg.warmup_seconds)
+    warmup_until = time.time() + warmup_seconds
+    if warmup_seconds > 0:
+        print(f"[capture] Camera warmup enabled: {warmup_seconds:.1f}s")
 
     pending: Deque[bytes] = deque(maxlen=cfg.max_queue)
     last_capture_time = 0.0
@@ -350,6 +364,27 @@ def run_capture(
             frame = resize_to_resolution(frame, cfg.width, cfg.height)
             
             now = time.time()
+            if now < warmup_until:
+                if preview:
+                    warmup_frame = frame.copy()
+                    remaining = max(0.0, warmup_until - now)
+                    cv2.putText(
+                        warmup_frame,
+                        f"Warming up camera... {remaining:.1f}s",
+                        (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1.0,
+                        (0, 255, 255),
+                        2,
+                    )
+                    cv2.imshow(window_name, warmup_frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord('q'):
+                        print("[capture] 'q' pressed, exiting.")
+                        break
+                time.sleep(0.03)
+                continue
+
             if now - last_capture_time >= cfg.capture_interval_sec:
                 jpeg = frame_to_jpeg(frame, cfg.jpeg_quality)
                 if jpeg is not None:
