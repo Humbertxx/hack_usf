@@ -39,10 +39,16 @@ export default function Home() {
             </button>
           </div>
         </div>
+        {grandma && (
         <div className="flex flex-wrap justify-between items-center gap-5 w-[90%] md:w-[80%]">
           <InsightCard />
         </div> 
-        
+        )}
+        {grandpa && (
+          <div className="flex flex-wrap justify-between items-center gap-5 w-[90%] md:w-[80%]">
+            <InsightCard />
+          </div>
+        )}
       </div>
     </>
   );
