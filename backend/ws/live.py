@@ -17,12 +17,17 @@ async def ws_live(websocket: WebSocket) -> None:
     client = SnowflakeClient()
     try:
         while True:
+            observations, alerts, enriched = await asyncio.gather(
+                asyncio.to_thread(client.get_recent_observations),
+                asyncio.to_thread(client.get_unacknowledged_alerts),
+                asyncio.to_thread(client.get_recent_enriched_observations),
+                )
             payload: Dict[str, Any] = {
                 "type": "live_update",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "observations": _safe_list(client.get_recent_observations()),
-                "alerts": _safe_list(client.get_unacknowledged_alerts()),
-                "enriched": _safe_list(client.get_recent_enriched_observations()),
+                "observations": _safe_list(observations),
+                "alerts": _safe_list(alerts),
+                "enriched": _safe_list(enriched),
             }
             await websocket.send_json(payload)
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
