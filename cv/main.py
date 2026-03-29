@@ -33,6 +33,19 @@ from cv.websocket_manager import WebSocketManager
 MIN_IDENTITY_CONFIDENCE = 0.65
 
 
+def _load_runtime_env() -> None:
+    """
+    Load likely env files for local development without overriding exported vars.
+
+    Order matters: repo-root .env stays supported, but backend-local env files are
+    also loaded because Snowflake credentials currently live there.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    load_dotenv(repo_root / ".env")
+    load_dotenv(repo_root / "backend" / ".env.humberto")
+    load_dotenv(repo_root / "backend" / ".env")
+
+
 def should_send_to_snowflake(
     obs: Observation,
     prev_sent: Optional[Observation],
@@ -120,8 +133,7 @@ def create_app(
     snowflake: Optional[Any] = None,
     identity_store: Optional[IdentityStore] = None,
 ) -> FastAPI:
-    # Repo-root .env (Snowflake, etc.). Does not override existing os.environ.
-    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+    _load_runtime_env()
 
     store = identity_store or IdentityStore()
     pipeline_factory = pipeline_factory or (lambda: CVPipeline(identity_store=store))

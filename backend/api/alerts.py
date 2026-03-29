@@ -14,7 +14,7 @@ def list_alerts(limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT), unacknowl
         if unacknowledged_only:
             alerts = client.get_unacknowledged_alerts()
         else:
-            alerts = client.get_recent_observations()
+            alerts = client.get_recent_alerts()
         if limit and len(alerts) > limit:
             alerts = alerts[:limit]
         return {"alerts": alerts}
