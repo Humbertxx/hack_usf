@@ -1,10 +1,21 @@
 "use client";
 import InsightCard from "../components/InsightCard";
 import { useState } from "react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 export default function Home() {
   const [grandma, setGrandma] = useState(true);
   const [grandpa, setGrandpa] = useState(false);
+  const [grandmametric, setGrandmametric] = useState(0);
+  const [grandpametric, setGrandpametric] = useState(0);
 
   return (
     <>
@@ -43,9 +54,11 @@ export default function Home() {
           <>
             <div className="flex flex-col w-[90%] md:w-[80%] ">
               <h2 className="text-2xl font-bold">Grandma</h2>
-              <div className="flex flex-wrap justify-between items-center gap-5 w-[100%]">
-                <InsightCard person="grandma" />
-              </div>
+              <InsightCard
+                person="grandma"
+                metric={grandmametric}
+                setmetric={setGrandmametric}
+              />
             </div>
           </>
         )}
@@ -54,7 +67,11 @@ export default function Home() {
             <div className="flex flex-col w-[90%] md:w-[80%] ">
               <h2 className="text-2xl font-bold">Grandpa</h2>
               <div className="flex flex-wrap justify-between items-center gap-5 w-[100%]">
-                <InsightCard person="grandpa" />
+                <InsightCard
+                  person="grandpa"
+                  metric={grandpametric}
+                  setmetric={setGrandpametric}
+                />
               </div>
             </div>
           </>

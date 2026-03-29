@@ -5,7 +5,6 @@ import { useOldPeopleContext } from "../OldPeopleContext";
 
 export default function NavBar() {
   const { Navbar, setNavbar } = useOldPeopleContext();
-
   return (
     <>
       <nav
