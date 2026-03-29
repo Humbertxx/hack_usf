@@ -1,20 +1,36 @@
 "use client";
 
 import Image from "next/image";
-import { useContext, useRef, useState, useEffect } from "react";
-import { OldPeopleContext, useOldPeopleContext } from "./OldPeopleContext";
-import router from "next/dist/shared/lib/router/router";
-import { useRouter } from "next/dist/client/components/navigation";
+import { useRef, useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { useOldPeopleContext } from "./OldPeopleContext";
+import { enrollmentSuccessDashboardHref } from "@/lib/enrollment-flags";
+import { getPreferredVideoStream } from "@/lib/getPreferredVideoStream";
+
+type DuoStep = "idle" | "grandma" | "grandpa";
+
+function canvasToJpegBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), "image/jpeg");
+  });
+}
 
 export default function Home() {
   const router = useRouter();
-  const { oldPeople, setOldPeople, Navbar, setNavbar } = useOldPeopleContext();
+  const { oldPeople, setOldPeople, setNavbar } = useOldPeopleContext();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // state to track camera
   const [isCameraActive, setIsCameraActive] = useState(false);
-  const [enroll, setenroll] = useState(false);
+  const [duoStep, setDuoStep] = useState<DuoStep>("idle");
+  const [enrollError, setEnrollError] = useState<string | null>(null);
+  const [isEnrolling, setIsEnrolling] = useState(false);
+
+  useEffect(() => {
+    if (oldPeople !== 3) {
+      setDuoStep("idle");
+    }
+  }, [oldPeople]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -62,44 +78,73 @@ export default function Home() {
     const canvas = canvasRef.current;
     const video = videoRef.current;
 
-    if (canvas && video) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas
-        .getContext("2d")
-        ?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    if (!canvas || !video || isEnrolling) return;
 
-      canvas.toBlob(async (blob) => {
-        if (!blob) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        const formData = new FormData();
-        formData.append("file", blob, "enroll.jpg");
-        formData.append("subject_id", subjectId);
-        formData.append(
-          "display_name",
-          subjectId === "grandma" ? "Grandma" : "Grandpa",
-        );
-        formData.append("color", "#FF6B6B");
+    const blob = await canvasToJpegBlob(canvas);
+    if (!blob) {
+      setEnrollError("Could not capture image.");
+      return;
+    }
 
-        const res = await fetch("/api/enroll", {
-          method: "POST",
-          body: formData,
-        });
+    const formData = new FormData();
+    formData.append("file", blob, "enroll.jpg");
+    formData.append("subject_id", subjectId);
+    formData.append(
+      "display_name",
+      subjectId === "grandma" ? "Grandma" : "Grandpa",
+    );
+    formData.append(
+      "color",
+      subjectId === "grandma" ? "#FF6B6B" : "#4ECDC4",
+    );
 
-        const result = await res.json();
-        console.log("Enrollment Success:", result);
+    setIsEnrolling(true);
+    setEnrollError(null);
 
-        if (result.success) {
-          alert(`${subjectId} enrolled successfully!`);
-          if (!enroll) {
-            router.push("/dashboard");
-            setNavbar(true);
-          }
-        }
+    try {
+      const res = await fetch("/api/enroll", {
+        method: "POST",
+        body: formData,
+      });
 
-        // camera close after capture
-        // setIsCameraActive(false);
-      }, "image/jpeg");
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        setEnrollError("Invalid response from server.");
+        return;
+      }
+
+      if (!res.ok) {
+        const detail = (body as { detail?: unknown })?.detail;
+        const msg =
+          typeof detail === "string"
+            ? detail
+            : Array.isArray(detail) && detail[0]?.msg
+              ? String(detail[0].msg)
+              : typeof (body as { error?: string })?.error === "string"
+                ? (body as { error: string }).error
+                : `Enrollment failed (${res.status})`;
+        setEnrollError(msg);
+        return;
+      }
+
+      if (oldPeople === 3 && subjectId === "grandma") {
+        setDuoStep("grandpa");
+        return;
+      }
+
+      stopVideoTracks();
+      setIsCameraActive(false);
+      setDuoStep("idle");
+      setNavbar(true);
+      router.push(enrollmentSuccessDashboardHref());
+    } finally {
+      setIsEnrolling(false);
     }
   };
 
@@ -165,6 +210,7 @@ export default function Home() {
               alt="Family"
               width={400}
               height={400}
+              priority
               className="w-full h-full object-cover rounded-2xl shadow"
             />
           )}
@@ -206,14 +252,14 @@ export default function Home() {
           )}
           {oldPeople === 1 && (
             <button
-              onClick={() => {
-                if (isCameraActive) {
-                  captureAndEnroll("grandma");
-                } else {
-                  setIsCameraActive(true);
-                }
-              }}
-              className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300"
+              type="button"
+              disabled={isEnrolling}
+              onClick={() =>
+                isCameraActive
+                  ? void captureAndEnroll("grandma")
+                  : setIsCameraActive(true)
+              }
+              className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
             >
               <p className="font-bold text-lg">
                 {isCameraActive
@@ -242,41 +288,36 @@ export default function Home() {
             </button>
           )}
 
-          {oldPeople === 3 && (
-            <>
-              <button
-                onClick={() => {
-                  captureAndEnroll("grandma");
-                  if (!enroll) {
-                    setenroll(true);
-                  } else {
-                    setenroll(false);
-                  }
-                }}
-                className={`bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 ${isCameraActive ? "" : "hidden"}`}
-              >
-                <p className="font-bold text-lg">Capture Grandma</p>
-              </button>
-              <button
-                onClick={() => {
-                  captureAndEnroll("grandpa");
-                  if (!enroll) {
-                    setenroll(true);
-                  } else {
-                    setenroll(false);
-                  }
-                }}
-                className={`bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 ${isCameraActive ? "" : "hidden"}`}
-              >
-                <p className="font-bold text-lg">Capture Grandpa</p>
-              </button>
-              <button
-                onClick={() => setIsCameraActive(true)}
-                className={`bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 ${isCameraActive ? "hidden" : ""}`}
-              >
-                <p className="font-bold text-lg">Start Duo Enrollment</p>
-              </button>
-            </>
+          {oldPeople === 3 && duoStep === "idle" && (
+            <button
+              type="button"
+              onClick={startDuo}
+              className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300"
+            >
+              <p className="font-bold text-lg">Start Duo Enrollment</p>
+            </button>
+          )}
+
+          {oldPeople === 3 && duoStep === "grandma" && isCameraActive && (
+            <button
+              type="button"
+              disabled={isEnrolling}
+              onClick={() => void captureAndEnroll("grandma")}
+              className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
+            >
+              <p className="font-bold text-lg">Capture Grandma</p>
+            </button>
+          )}
+
+          {oldPeople === 3 && duoStep === "grandpa" && isCameraActive && (
+            <button
+              type="button"
+              disabled={isEnrolling}
+              onClick={() => void captureAndEnroll("grandpa")}
+              className="bg-sky-100 p-5 rounded-lg shadow hover:scale-110 transition border-2 border-sky-300 disabled:opacity-50 disabled:hover:scale-100"
+            >
+              <p className="font-bold text-lg">Capture Grandpa</p>
+            </button>
           )}
 
           {isCameraActive && (
